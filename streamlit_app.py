@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja strony i Naprawa UI (v2.9.2)
+# 1. Konfiguracja strony i Naprawa Interfejsu (v2.9.3)
 st.set_page_config(page_title="SQM FLOTA | Control Tower", layout="wide")
 
 st.markdown("""
@@ -24,23 +24,11 @@ st.markdown("""
         color: white;
         text-shadow: 4px 4px 0px #1e1e1e;
         margin-bottom: 0px;
-        padding-top: 20px;
+        padding-top: 10px;
     }
     .dot-r { color: #e02424; } .dot-b { color: #2563eb; } .dot-y { color: #facc15; }
 
-    /* Naprawa suwaków i widoczności edytora */
-    [data-testid="stDataEditor"] {
-        background-color: white !important;
-        border-radius: 10px;
-        border: 4px solid #facc15;
-        overflow: auto !important; /* WYMUSZENIE SUWAKA */
-    }
-    
-    .stTabs [data-baseweb="tab-panel"] {
-        padding-top: 20px;
-    }
-
-    /* Zakładki: Styl NEON Central Perk */
+    /* Stylizacja Zakładek: Neon Central Perk */
     .stTabs [data-baseweb="tab-list"] {
         gap: 15px;
         background-color: rgba(0,0,0,0.3);
@@ -53,6 +41,7 @@ st.markdown("""
         color: #744DA9 !important;
         font-weight: 900;
         border: 3px solid transparent;
+        padding: 5px 20px;
     }
     .stTabs [aria-selected="true"] {
         background-color: #facc15 !important;
@@ -60,13 +49,22 @@ st.markdown("""
         box-shadow: 0 0 20px #facc15;
     }
 
-    /* Wykres: Żółta Ramka Wizjera Moniki */
+    /* Stylizacja Wykresów - Żółta Ramka */
     .stPlotlyChart {
         background-color: #ffffff;
-        border: 10px solid #facc15 !important;
+        border: 8px solid #facc15 !important;
         border-radius: 20px !important;
-        padding: 15px;
-        box-shadow: 15px 15px 0px rgba(0,0,0,0.4);
+        padding: 10px;
+        box-shadow: 10px 10px 0px rgba(0,0,0,0.4);
+    }
+
+    /* Specjalny kontener na edytor - oddech od tła */
+    .editor-container {
+        background-color: white;
+        padding: 20px;
+        border-radius: 15px;
+        border: 5px solid #facc15;
+        margin-top: 20px;
     }
 
     /* Przycisk PIVOT! */
@@ -74,19 +72,20 @@ st.markdown("""
         background-color: #e02424;
         color: white;
         font-family: 'Permanent Marker', cursive;
-        font-size: 2rem;
-        height: 70px;
+        font-size: 2.2rem;
+        height: 80px;
         border-radius: 15px;
         border: 4px solid #ffffff;
         box-shadow: 6px 6px 0px #1e1e1e;
+        width: 100%;
         margin-top: 20px;
     }
     </style>
 
     <div class="friends-title">
-        S<span class="dot-r">·</span>Q<span class="dot-m">·</span>M<span class="dot-y">·</span>FLOTA
+        S<span class="dot-r">·</span>Q<span class="dot-b">·</span>M<span class="dot-y">·</span>FLOTA
     </div>
-    <div style="text-align: center; color: white; font-family: 'Inter'; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px;">
+    <div style="text-align: center; color: white; font-family: 'Inter'; font-weight: 900; margin-bottom: 20px; letter-spacing: 2px;">
         THE ONE WITH THE LOGISTICS SLOTS
     </div>
     """, unsafe_allow_html=True)
@@ -143,16 +142,12 @@ event_colors = {ev: friends_palette[i % len(friends_palette)] for i, ev in enume
 for i, category in enumerate(RESOURCES.keys()):
     with tabs[i]:
         cat_df = df[df['pojazd'].isin(RESOURCES[category])].copy()
-        
         if not cat_df.empty:
             fig = px.timeline(
                 cat_df, x_start="start", x_end="koniec", y="pojazd",
-                color="event", text="event",
-                color_discrete_map=event_colors,
-                category_orders={"pojazd": RESOURCES[category]},
-                template="plotly_white"
+                color="event", text="event", color_discrete_map=event_colors,
+                category_orders={"pojazd": RESOURCES[category]}, template="plotly_white"
             )
-            
             today = datetime.now()
             fig.update_xaxes(
                 side="top", showgrid=True, gridcolor="#eee",
@@ -160,43 +155,36 @@ for i, category in enumerate(RESOURCES.keys()):
                 tickfont=dict(size=11, family="Inter Black", color="#744DA9"),
                 range=[today - timedelta(days=2), today + timedelta(days=14)]
             )
-            
             fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter Black"))
-            fig.update_traces(
-                textposition='inside', insidetextanchor='middle',
-                textfont=dict(size=12, color="white", family="Inter Black"),
-                marker=dict(line=dict(width=2, color='white'))
-            )
-            fig.update_layout(
-                height=len(RESOURCES[category]) * 55 + 150,
-                margin=dict(l=10, r=10, t=80, b=10),
-                showlegend=False, bargap=0.35
-            )
+            fig.update_traces(textposition='inside', insidetextanchor='middle')
+            fig.update_layout(height=len(RESOURCES[category]) * 55 + 150, margin=dict(l=10, r=10, t=80, b=10), showlegend=False)
             fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#e02424")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No runs planned yet.")
+            st.info("How you doin'? Brak danych.")
 
-# 5. ZARZĄDZANIE (Z POPRAWIONYM SUWAKIEM)
+# 5. ZARZĄDZANIE - Wersja z wymuszonym suwakiem
 with tabs[-1]:
-    st.subheader("📝 Baza Transportowa SQM")
+    st.markdown('<div class="editor-container">', unsafe_allow_html=True)
+    st.subheader("📝 Edycja Bazy Floty")
     
-    # Dodatkowy kontener dla edytora
-    with st.container():
-        edited_df = st.data_editor(
-            df, 
-            num_rows="dynamic", 
-            use_container_width=True,
-            column_config={
-                "pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_RESOURCES),
-                "start": st.column_config.DateColumn("Start"),
-                "koniec": st.column_config.DateColumn("Koniec")
-            },
-            key="fixed_scroll_editor"
-        )
+    # Parametr 'height' wymusza suwak boczny, a 'use_container_width' suwak poziomy
+    edited_df = st.data_editor(
+        df, 
+        num_rows="dynamic", 
+        use_container_width=True,
+        height=500,  # SZTYWNA WYSOKOŚĆ = GWARANTOWANY SUWAK
+        column_config={
+            "pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_RESOURCES),
+            "start": st.column_config.DateColumn("Start"),
+            "koniec": st.column_config.DateColumn("Koniec")
+        },
+        key="super_scroll_editor_v3"
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
     
     if st.button("PIVOT! PIVOT! PIVOT!"):
-        with st.spinner("Saving..."):
+        with st.status("Saving..."):
             save_df = edited_df.copy()
             save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
