@@ -4,55 +4,64 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja strony i Clean UI Style
-st.set_page_config(page_title="SQM LOGISTICS | Control Tower", layout="wide")
+# 1. Konfiguracja i Styl "Friends"
+st.set_page_config(page_title="SQM | The One with the Logistics", layout="wide")
 
 st.markdown("""
     <style>
-    /* Tło strony - jasny, profesjonalny szary */
-    .stApp { background-color: #f8f9fa; }
-    
-    /* Nagłówek aplikacji */
-    h1 { 
-        color: #1e293b; 
-        font-family: 'Inter', sans-serif; 
-        font-weight: 700; 
-        padding-bottom: 1rem;
-    }
+    /* Import czcionki przypominającej styl czołówki */
+    @import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Inter:wght@400;700&display=swap');
 
-    /* Stylizacja Zakładek - Nowoczesne i lekkie */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 12px;
-        background-color: transparent;
+    .stApp { background-color: #f4ece1; } /* Beż Central Perk */
+
+    /* Nagłówek w stylu Friends */
+    .friends-logo {
+        font-family: 'Permanent+Marker', cursive;
+        font-size: 3rem;
+        text-align: center;
+        color: #1e1e1e;
+        letter-spacing: 5px;
+        margin-bottom: 20px;
     }
+    .dot-red { color: #e02424; } .dot-blue { color: #2563eb; } .dot-yellow { color: #facc15; }
+
+    /* Zakładki - Fiolet Moniki */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
     .stTabs [data-baseweb="tab"] {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        color: #64748b;
-        padding: 8px 16px;
-        transition: all 0.3s;
+        background-color: #6b46c1; /* Fioletowe drzwi */
+        color: white;
+        border-radius: 20px;
+        padding: 10px 25px;
+        border: 2px solid #4c1d95;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #3b82f6 !important;
-        color: white !important;
-        border-color: #3b82f6 !important;
-        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        background-color: #facc15 !important; /* Żółta ramka wizjera */
+        color: #1e1e1e !important;
+        font-weight: bold;
     }
 
-    /* Karta wykresu */
+    /* Kontener wykresu */
     .stPlotlyChart {
         background-color: #ffffff;
-        border-radius: 12px;
-        padding: 15px;
-        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
-        border: 1px solid #e2e8f0;
+        border: 5px solid #6b46c1;
+        border-radius: 15px;
+        padding: 10px;
     }
-    
-    /* Ukrycie menu Streamlit */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+
+    /* Przycisk zapisu */
+    .stButton>button {
+        background-color: #e02424;
+        color: white;
+        border-radius: 50px;
+        font-family: 'Permanent Marker', cursive;
+        border: none;
+        padding: 10px 30px;
+    }
     </style>
+    
+    <div class="friends-logo">
+        S<span class="dot-red">·</span>Q<span class="dot-blue">·</span>M<span class="dot-yellow">·</span> LOGISTICS
+    </div>
     """, unsafe_allow_html=True)
 
 # 2. DEFINICJA ZASOBÓW
@@ -82,13 +91,12 @@ RESOURCES = {
 
 ALL_RESOURCES = [item for sublist in RESOURCES.values() for item in sublist]
 
-# 3. LOGIKA DANYCH
+# 3. DANE
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-@st.cache_data(ttl=0)
 def get_data():
     try:
-        data = conn.read()
+        data = conn.read(ttl="0s")
         data.columns = [c.strip().lower() for c in data.columns]
         expected = ["pojazd", "event", "start", "koniec", "kierowca", "notatka"]
         data = data[expected].copy()
@@ -100,18 +108,17 @@ def get_data():
 
 df = get_data()
 
-# 4. DASHBOARD UI
-st.title("🛰️ SQM Logistics Control")
+# 4. DASHBOARD - "The One with the Fleet"
+tabs = st.tabs([f"🎬 {k}" for k in RESOURCES.keys()] + ["☕ CENTRAL PERK"])
 
-tabs = st.tabs([f" {k}" for k in RESOURCES.keys()] + ["⚙️ Zarządzanie"])
-
-# Pastelowa paleta - wysoka czytelność czarnego tekstu
-logistics_colors = ["#93c5fd", "#86efac", "#fde68a", "#f9a8d4", "#c4b5fd", "#fdba74"]
+# Paleta kolorów "Friends" (Kultowa Kanapa, Ściany, Neon)
+friends_palette = ["#e02424", "#2563eb", "#facc15", "#6b46c1", "#059669", "#d97706"]
 unique_events = sorted(df['event'].unique())
-event_colors = {ev: logistics_colors[i % len(logistics_colors)] for i, ev in enumerate(unique_events)}
+event_colors = {ev: friends_palette[i % len(friends_palette)] for i, ev in enumerate(unique_events)}
 
 for i, (category, items) in enumerate(RESOURCES.items()):
     with tabs[i]:
+        st.subheader(f"The One with {category}")
         cat_df = df[df['pojazd'].isin(items)].copy()
         
         if not cat_df.empty:
@@ -125,66 +132,53 @@ for i, (category, items) in enumerate(RESOURCES.items()):
             
             today = datetime.now()
             fig.update_xaxes(
-                side="top", showgrid=True, gridcolor="#f1f5f9",
+                side="top", showgrid=True, gridcolor="#e2e8f0",
                 tickformat="%d\n%a", dtick=86400000.0,
-                tickfont=dict(size=10, family="Inter, sans-serif", color="#64748b"),
-                range=[today - timedelta(days=2), today + timedelta(days=14)],
-                rangeslider=dict(visible=True, thickness=0.02, bgcolor="#f8f9fa")
+                tickfont=dict(size=10, family="Inter", color="#4b5563"),
+                range=[today - timedelta(days=2), today + timedelta(days=14)]
             )
             
-            # Weekendy - bardzo jasny niebieski/szary
-            start_cal = datetime(2026, 1, 1)
+            # Weekendy - Kolor Kanapy Central Perk (lekko wyblakły)
             for d in range(366):
-                curr = start_cal + timedelta(days=d)
+                curr = datetime(2026, 1, 1) + timedelta(days=d)
                 if curr.weekday() >= 5:
                     fig.add_vrect(
                         x0=curr.strftime("%Y-%m-%d"), x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
-                        fillcolor="#f1f5f9", opacity=1, layer="below", line_width=0
+                        fillcolor="#d97706", opacity=0.1, layer="below", line_width=0
                     )
 
-            fig.update_yaxes(
-                title="", 
-                tickfont=dict(size=11, family="Inter", color="#1e293b"),
-                gridcolor="#f1f5f9"
-            )
-            
+            fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter", color="#1f2937"))
             fig.update_traces(
-                textposition='inside',
-                insidetextanchor='middle',
-                textfont=dict(size=11, family="Inter Black", color="#1e293b"), # Ciemny tekst na pastelach
-                marker=dict(line=dict(width=1, color='white'))
+                textposition='inside', insidetextanchor='middle',
+                textfont=dict(size=12, family="Inter Black", color="white"),
+                marker=dict(line=dict(width=2, color='white'))
             )
             
             fig.update_layout(
-                height=len(items) * 45 + 100,
+                height=len(items) * 50 + 100,
                 margin=dict(l=10, r=10, t=60, b=0),
                 showlegend=False, bargap=0.3,
-                plot_bgcolor='white',
-                paper_bgcolor='white'
+                paper_bgcolor='white', plot_bgcolor='white'
             )
             
-            # Linia DZIŚ - wyraźny niebieski
-            fig.add_vline(x=today.timestamp()*1000, line_width=2, line_color="#3b82f6")
+            # Linia "PIVOT!" (Dziś)
+            fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#e02424")
             
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.info(f"Brak zaplanowanych zadań dla sekcji {category}")
+            st.info("How you doin'? Tu jeszcze nic nie ma.")
 
-# 5. ZARZĄDZANIE
+# 5. ZAPIS - "The One where we save data"
 with tabs[-1]:
-    st.subheader("🛠️ Edycja i Synchronizacja")
+    st.subheader("☕ The One with the Editor")
     edited_df = st.data_editor(
         df, num_rows="dynamic", use_container_width=True,
-        column_config={
-            "pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES),
-            "start": st.column_config.DateColumn("Początek"),
-            "koniec": st.column_config.DateColumn("Koniec")
-        },
-        key="sqm_v26_bright"
+        column_config={"pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES)},
+        key="friends_v27"
     )
     
-    if st.button("💾 ZAPISZ ZMIANY W BAZIE"):
-        with st.status("Aktualizacja danych..."):
+    if st.button("💾 SAVE THE EPISODE"):
+        with st.status("PIVOT! PIVOT! (Zapisywanie...)"):
             save_df = edited_df.copy()
             save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
