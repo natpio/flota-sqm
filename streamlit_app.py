@@ -4,45 +4,18 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja strony
-st.set_page_config(
-    page_title="SQM Logistics | Fleet Manager",
-    page_icon="🚚",
-    layout="wide"
-)
+# Konfiguracja strony
+st.set_page_config(page_title="SQM Logistics Planner", layout="wide")
 
-# 2. Stylizacja Clean Light Mode
+# CSS dla poprawy wyglądu i czytelności
 st.markdown("""
     <style>
-    .stApp { background-color: #f8f9fa; color: #212529; }
-    
-    /* Karty statystyk w stylu SaaS */
-    div[data-testid="stMetric"] {
-        background-color: #ffffff;
-        border: 1px solid #dee2e6;
-        padding: 1.5rem;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-    }
-    [data-testid="stMetricValue"] { color: #007bff !important; font-weight: 600; }
-    
-    /* Przyciski */
-    .stButton>button {
-        background-color: #007bff;
-        color: white;
-        border-radius: 6px;
-        padding: 0.5rem 2rem;
-        border: none;
-        font-weight: 500;
-    }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; font-weight: 500; }
+    .main { background-color: #ffffff; }
+    .stMetric { background-color: #fdfdfd; border: 1px solid #ececec; border-radius: 4px; }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Dane
+# Połączenie
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
@@ -53,144 +26,132 @@ def load_data():
         data.columns = [c.strip().lower() for c in data.columns]
         data['start'] = pd.to_datetime(data['start'], errors='coerce')
         data['koniec'] = pd.to_datetime(data['koniec'], errors='coerce')
-        for col in ['pojazd', 'event', 'kierowca', 'notatka']:
-            if col in data.columns:
-                data[col] = data[col].astype(str).replace(['nan', 'None'], '')
-        return data
+        return data.dropna(subset=['pojazd', 'start', 'koniec'])
     except:
-        return pd.DataFrame(columns=["pojazd", "event", "start", "koniec", "kierowca", "notatka"])
+        return pd.DataFrame()
 
 df = load_data()
 
-# --- DASHBOARD HEADER ---
-st.title("System Zarządzania Flotą SQM")
-st.markdown("---")
+# --- PANEL STATYSTYK ---
+st.title("🚛 SQM Logistics: Fleet Grid Planner")
+if not df.empty:
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Pojazdy w trasie", df['pojazd'].nunique())
+    m2.metric("Aktywne zlecenia", len(df))
+    m3.metric("Ostatnia synchronizacja", datetime.now().strftime("%H:%M:%S"))
 
-# Statystyki
-m1, m2, m3, m4 = st.columns(4)
-today = datetime.now()
-m1.metric("Aktywne pojazdy", df['pojazd'].nunique() if not df.empty else 0)
-m2.metric("Zaplanowane eventy", len(df))
-m3.metric("Transporty dziś", df[(df['start'] <= today) & (df['koniec'] >= today)].shape[0] if not df.empty else 0)
-m4.metric("Status bazy", "Synchronizacja OK")
+st.divider()
 
-# --- GANTT CHART SECTION ---
-if not df.empty and df['start'].notnull().any():
-    st.subheader("Harmonogram Operacyjny")
+# --- HARMONOGRAM W KRATKĘ ---
+if not df.empty:
+    # Przygotowanie zakresu dat do rysowania siatki weekendów
+    min_date = df['start'].min() - timedelta(days=2)
+    max_date = df['koniec'].max() + timedelta(days=7)
     
-    plot_df = df.dropna(subset=['start', 'koniec', 'pojazd']).sort_values('pojazd')
-    
-    # Obliczanie zakresu dat dla weekendów
-    min_date = plot_df['start'].min() - timedelta(days=2)
-    max_date = plot_df['koniec'].max() + timedelta(days=5)
-    
+    # Tworzenie wykresu
     fig = px.timeline(
-        plot_df, 
+        df, 
         x_start="start", 
         x_end="koniec", 
         y="pojazd", 
-        color="pojazd",
+        color="pojazd", # Kolorowanie per auto dla czytelności
         text="event",
         hover_name="event",
         custom_data=["kierowca", "notatka"],
-        color_discrete_sequence=px.colors.qualitative.Set3 # Pastelowe kolory na jasnym tle
+        color_discrete_sequence=px.colors.qualitative.Dark24
     )
 
-    # Ustawienia osi X zgodnie z życzeniem (Miesiąc, Dzień, Dzień tygodnia)
+    # KONFIGURACJA SIATKI I OSI
     fig.update_xaxes(
         side="top",
-        dtick="D1", # Jednostka co 1 dzień
-        tickformat="%d\n%a", # Dzień i skrót tygodnia (np. 27 Tue)
-        hoverformat="%Y-%m-%d",
-        gridcolor="#f0f0f0",
-        tickangle=0,
+        dtick="D1", # Linia pomocnicza co 1 dzień
+        gridcolor="#e1e1e1", # Kolor pionowych linii siatki
+        griddash="solid",
+        tickformat="%d\n%a", # Numer dnia i skrót dnia tygodnia
+        tickfont=dict(size=10, color="#444"),
         title="",
-    )
-    
-    # Dodanie nazw miesięcy jako dodatkowa warstwa (Plotly nie pozwala na 3 poziomy natywnie w px,
-    # dlatego używamy formatowania ticków i grupujemy daty)
-    fig.update_layout(
-        xaxis=dict(
-            tickformat="%d\n%a", 
-            labelalias={datetime(2026, 1, 1).strftime("%d\n%a"): "Jan"}, # Uproszczenie dla czytelności
-        )
+        # Dodanie miesięcy nad dniami
+        ticklabelmode="period",
+        minor=dict(dtick="D1", gridcolor="#f0f0f0")
     )
 
-    # Zaznaczanie weekendów (pionowe pasy)
-    current_d = min_date
-    while current_d <= max_date:
-        if current_d.weekday() >= 5: # 5=Sobota, 6=Niedziela
+    fig.update_yaxes(
+        autorange="reversed", 
+        gridcolor="#e1e1e1", # Poziome linie siatki
+        title=""
+    )
+
+    # ZAZNACZANIE WEEKENDÓW (Pionowe pasy w tle)
+    curr = min_date
+    while curr <= max_date:
+        if curr.weekday() >= 5: # Sobota i Niedziela
             fig.add_vrect(
-                x0=current_d.strftime("%Y-%m-%d 00:00"),
-                x1=(current_d + timedelta(days=1)).strftime("%Y-%m-%d 00:00"),
-                fillcolor="#f2f2f2",
-                opacity=0.5,
+                x0=curr.strftime("%Y-%m-%d"),
+                x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
+                fillcolor="#f2f2f2", # Jasnoszary pas dla weekendu
+                opacity=1,
                 layer="below",
                 line_width=0,
             )
-        current_d += timedelta(days=1)
+        curr += timedelta(days=1)
 
-    fig.update_yaxes(autorange="reversed", title="", gridcolor="#f0f0f0")
-    fig.update_layout(
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        height=500,
-        showlegend=False,
-        margin=dict(l=10, r=10, t=100, b=10),
-        font=dict(color="#495057", size=11)
-    )
-    
+    # WYGLĄD PASKÓW I ETYKIET
     fig.update_traces(
         textposition='inside',
+        insidetextanchor='middle',
         marker=dict(line=dict(width=1, color='white')),
-        hovertemplate="<b>%{hovertext}</b><br>Kierowca: %{customdata[0]}<br>Notatki: %{customdata[1]}<extra></extra>"
+        hovertemplate="<b>%{hovertext}</b><br>Kierowca: %{customdata[0]}<br>Notatka: %{customdata[1]}<extra></extra>"
+    )
+
+    fig.update_layout(
+        plot_bgcolor="white", # Tło białe dla kontrastu z siatką
+        paper_bgcolor="white",
+        height=600,
+        showlegend=False,
+        margin=dict(l=10, r=10, t=80, b=10),
+        font=dict(family="Arial Narrow")
     )
 
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-# --- MANAGEMENT PANEL ---
-st.markdown("<br>", unsafe_allow_html=True)
-st.subheader("Baza danych i Planowanie")
+# --- PANEL OPERACYJNY ---
+st.subheader("📋 Zarządzanie Transportami")
+tab_edit, tab_conf = st.tabs(["Edytuj Grafik", "Sprawdź Kolizje"])
 
-tab1, tab2 = st.tabs(["📝 Edycja wpisów", "📋 Lista konfliktów"])
-
-with tab1:
-    editor_df = st.data_editor(
+with tab_edit:
+    edited_df = st.data_editor(
         df,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "pojazd": st.column_config.TextColumn("Pojazd", width="medium"),
-            "event": st.column_config.TextColumn("Nazwa eventu", width="large"),
             "start": st.column_config.DateColumn("Start"),
             "koniec": st.column_config.DateColumn("Koniec"),
-            "kierowca": st.column_config.TextColumn("Kierowca"),
-            "notatka": st.column_config.TextColumn("Notatka")
+            "pojazd": st.column_config.TextColumn("🚛 Pojazd"),
+            "event": st.column_config.TextColumn("🏷 Event")
         },
-        key="sqm_light_v1"
+        key="sqm_grid_v1"
     )
 
-    if st.button("Zapisz zmiany w arkuszu"):
-        save_df = editor_df.copy()
+    if st.button("💾 ZAPISZ I SYNCHRONIZUJ"):
+        save_df = edited_df.copy()
         save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-        save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d').fillna('')
-        save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d').fillna('')
+        save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
+        save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
         conn.update(data=save_df)
-        st.toast("Dane zostały pomyślnie zapisane.", icon="☁️")
+        st.success("Baza zaktualizowana!")
         st.rerun()
 
-with tab2:
-    if not editor_df.empty:
-        c_df = editor_df.sort_values(['pojazd', 'start'])
-        conflicts = []
+with tab_conf:
+    if not edited_df.empty:
+        c_df = edited_df.sort_values(['pojazd', 'start'])
+        conf_list = []
         for v in c_df['pojazd'].unique():
-            if not v: continue
             v_data = c_df[c_df['pojazd'] == v]
             for i in range(len(v_data)-1):
                 if v_data.iloc[i]['koniec'] > v_data.iloc[i+1]['start']:
-                    conflicts.append(f"Kolizja: **{v}** zajęty przez '{v_data.iloc[i]['event']}' oraz '{v_data.iloc[i+1]['event']}'")
+                    conf_list.append(f"❌ {v}: '{v_data.iloc[i]['event']}' nakłada się na '{v_data.iloc[i+1]['event']}'")
         
-        if conflicts:
-            for c in conflicts: st.warning(c)
+        if conf_list:
+            for c in conf_list: st.error(c)
         else:
-            st.success("Wszystkie pojazdy mają poprawnie zaplanowany czas.")
+            st.success("Brak kolizji czasowych.")
