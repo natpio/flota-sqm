@@ -2,77 +2,34 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import re
 
 # ==========================================
-# 1. KONFIGURACJA STRONY (GŁÓWNE USTAWIENIA)
+# 1. KONFIGURACJA STRONY
 # ==========================================
 st.set_page_config(
-    page_title="LOGISTYKA SQM - ZARZĄDZANIE FLOTĄ",
+    page_title="LOGISTYKA SQM - PANEL OPERACYJNY",
     layout="wide",
-    page_icon="🚚",
-    initial_sidebar_state="expanded"
+    page_icon="🚚"
 )
 
-# ==========================================
-# 2. ZAAWANSOWANE STYLE CSS (INTERFEJS)
-# ==========================================
+# Stylizacja interfejsu
 st.markdown("""
     <style>
-    /* Tło i czcionki */
-    .stApp { background-color: #f4f7f9; }
-    
-    /* Sidebar - Panel Logistyka */
-    section[data-testid="stSidebar"] {
-        background-color: #1e293b !important;
-        color: white !important;
-        width: 450px !important;
+    .stApp { background-color: #f8fafc; }
+    .sidebar-header { color: #f8fafc; font-size: 1.3rem; font-weight: bold; margin-bottom: 15px; }
+    .conflict-box {
+        background-color: #fee2e2; border: 2px solid #ef4444;
+        padding: 15px; border-radius: 8px; color: #b91c1c; margin-bottom: 20px;
     }
-    section[data-testid="stSidebar"] .stMarkdown h2, 
-    section[data-testid="stSidebar"] .stMarkdown h1,
-    section[data-testid="stSidebar"] label {
-        color: #f8fafc !important;
-    }
-    
-    /* Karty alertów i konfliktów */
-    .conflict-alert {
-        background-color: #fef2f2;
-        border: 2px solid #dc2626;
-        padding: 20px;
-        border-radius: 10px;
-        color: #991b1b;
-        font-weight: bold;
-        margin-bottom: 25px;
-    }
-    
-    /* Formatowanie wykresu Plotly */
-    .plot-container {
-        border-radius: 15px;
-        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-        background: white;
-        padding: 10px;
-    }
-    
-    /* Stylizacja tabeli edycji */
-    [data-testid="stTable"] {
-        background-color: white;
-    }
-    
-    /* Nagłówek grupy pojazdów */
-    .group-header {
-        background-color: #334155;
-        color: white;
-        padding: 8px 15px;
-        border-radius: 5px;
-        margin-top: 15px;
-    }
+    [data-testid="stSidebar"] { background-color: #0f172a !important; }
+    .stDateInput label, .stSelectbox label, .stTextInput label { color: #f8fafc !important; }
     </style>
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 3. DEFINICJA STRUKTURY FLOTY (DANE SQM)
+# 2. STRUKTURA FLOTY SQM
 # ==========================================
 VEHICLE_STRUCTURE = {
     "OSOBÓWKI": [
@@ -93,271 +50,221 @@ VEHICLE_STRUCTURE = {
         "31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS",
         "TIR 3- PNT3530A/PZ4U343 DANIELAK", "44 - SOLO PY 73262", "45 - PY1541M + przyczepa"
     ],
-    "SPEDYCJA / RENTAL": [
-        "SPEDYCJA 1", "SPEDYCJA 2", "SPEDYCJA 3", "SPEDYCJA 4", "SPEDYCJA 5", "AUTO RENTAL"
-    ],
-    "MIESZKANIA BCN": [
-        "MIESZKANIE BCN - TORRASA", "MIESZKANIE BCN - ARGENTINA (PM)"
-    ]
+    "SPEDYCJA / RENTAL": ["SPEDYCJA 1", "SPEDYCJA 2", "SPEDYCJA 3", "SPEDYCJA 4", "AUTO RENTAL"],
+    "MIESZKANIA BCN": ["MIESZKANIE BCN - TORRASA", "MIESZKANIE BCN - ARGENTINA (PM)"]
 }
 
-# Tworzenie płaskiej listy do walidacji i sortowania
-ALL_VEHICLES_ORDERED = []
-for cat, v_list in VEHICLE_STRUCTURE.items():
-    ALL_VEHICLES_ORDERED.extend(v_list)
+ALL_VEHICLES = [v for sub in VEHICLE_STRUCTURE.values() for v in sub]
 
-# ==========================================
-# 4. LOKALIZACJA I DATY (POLSKA)
-# ==========================================
-PL_MONTHS = {
-    1: "STYCZEŃ", 2: "LUTY", 3: "MARZEC", 4: "KWIECIEŃ", 5: "MAJ", 6: "CZERWIEC", 
-    7: "LIPIEC", 8: "SIERPIEŃ", 9: "WRZESIEŃ", 10: "PAŹDZIERNIK", 11: "LISTOPAD", 12: "GRUDZIEŃ"
-}
+# Stałe dat
+PL_MONTHS = {1: "STYCZEŃ", 2: "LUTY", 3: "MARZEC", 4: "KWIECIEŃ", 5: "MAJ", 6: "CZERWIEC", 
+             7: "LIPIEC", 8: "SIERPIEŃ", 9: "WRZESIEŃ", 10: "PAŹDZIERNIK", 11: "LISTOPAD", 12: "GRUDZIEŃ"}
 PL_WEEKDAYS = ["Pn", "Wt", "Śr", "Cz", "Pt", "Sb", "Nd"]
-
-# Święta 2026 - krytyczne dla slotów i transportu międzynarodowego
-POLISH_HOLIDAYS = [
-    "2026-01-01", "2026-01-06", "2026-04-05", "2026-04-06", "2026-05-01", 
-    "2026-05-03", "2026-06-04", "2026-08-15", "2026-11-01", "2026-11-11", 
-    "2026-12-25", "2026-12-26"
-]
+POLISH_HOLIDAYS = ["2026-01-01", "2026-01-06", "2026-04-05", "2026-04-06", "2026-05-01", 
+                   "2026-05-03", "2026-06-04", "2026-08-15", "2026-11-01", "2026-11-11", 
+                   "2026-12-25", "2026-12-26"]
 
 # ==========================================
-# 5. OBSŁUGA DANYCH (GOOGLE SHEETS)
+# 3. FUNKCJE DANYCH
 # ==========================================
-def safe_clean_name(name):
-    """Usuwa zbędne znaki dla poprawnego mapowania nazw pojazdów"""
-    if pd.isna(name): return ""
-    return re.sub(r'[^a-zA-Z0-9]', '', str(name)).upper()
-
-# Połączenie
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def load_transport_data():
-    """Wczytuje i czyści dane z arkusza FLOTA_SQM"""
+def load_data():
     try:
         df = conn.read(worksheet="FLOTA_SQM", ttl="0")
-        if df.empty: return pd.DataFrame(columns=["Pojazd", "Projekt", "Kierowca", "Data_Start", "Data_Koniec", "Uwagi"])
+        if df.empty:
+            return pd.DataFrame(columns=["Pojazd", "Projekt", "Kierowca", "Data_Start", "Data_Koniec", "Uwagi"])
         
-        # Standaryzacja kolumn
-        df.columns = [c.strip() for c in df.columns]
+        # Czyszczenie nagłówków
+        df.columns = [str(c).strip() for c in df.columns]
         
-        # Konwersja i walidacja dat
+        # Konwersja dat z zabezpieczeniem
         df['Data_Start'] = pd.to_datetime(df['Data_Start'], errors='coerce')
         df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'], errors='coerce')
         
-        # Automatyczna korekta nazw (Fuzzy Match)
-        clean_map = {safe_clean_name(v): v for v in ALL_VEHICLES_ORDERED}
-        df['Pojazd'] = df['Pojazd'].apply(lambda x: clean_map.get(safe_clean_name(x), str(x).strip()))
-        
-        # Filtrowanie tylko kompletnych wpisów
-        df = df.dropna(subset=['Data_Start', 'Data_Koniec'])
+        # Usunięcie wierszy całkowicie pustych
+        df = df.dropna(subset=['Pojazd', 'Data_Start', 'Data_Koniec'])
         return df
     except Exception as e:
-        st.error(f"Błąd krytyczny połączenia z Google Sheets: {e}")
+        st.error(f"Błąd ładowania danych: {e}")
         return pd.DataFrame()
 
-# Pobranie danych
-df_raw = load_transport_data()
+df_main = load_data()
 
-# ==========================================
-# 6. LOGIKA KONFLIKTÓW (WALIDACJA)
-# ==========================================
-def get_conflicts(df, vehicle, start, end):
-    """Sprawdza czy auto nie jest zajęte w podanym oknie czasowym"""
+def check_conflicts(df, vehicle, start, end, ignore_idx=None):
+    if df.empty: return None
     s_dt = pd.to_datetime(start)
     e_dt = pd.to_datetime(end)
     
-    overlapping = df[
-        (df['Pojazd'] == vehicle) & 
-        (df['Data_Start'] <= e_dt) & 
-        (df['Data_Koniec'] >= s_dt)
-    ]
-    return overlapping
+    temp_df = df.copy()
+    if ignore_idx is not None:
+        temp_df = temp_df.drop(ignore_idx)
+        
+    mask = (temp_df['Pojazd'] == vehicle) & (temp_df['Data_Start'] <= e_dt) & (temp_df['Data_Koniec'] >= s_dt)
+    conflicts = temp_df[mask]
+    return conflicts if not conflicts.empty else None
 
 # ==========================================
-# 7. SIDEBAR - PANEL OPERACYJNY LOGISTYKA
+# 4. SIDEBAR - DODAWANIE WPISU
 # ==========================================
 with st.sidebar:
-    st.image("https://www.sqm.pl/wp-content/uploads/2019/02/logo-sqm.png", width=120)
-    st.markdown("## 🛠️ ZAPLANUJ TRANSPORT")
+    st.markdown('<p class="sidebar-header">🚚 NOWY TRANSPORT</p>', unsafe_allow_html=True)
     
-    with st.form("add_transport_form", clear_on_submit=True):
-        f_car = st.selectbox("Pojazd / Zasób", ALL_VEHICLES_ORDERED)
-        f_proj = st.text_input("Nazwa Eventu (Projekt)")
-        f_driver = st.text_input("Kierowca (lub dane naczepy)")
+    with st.form("new_transport_form"):
+        f_veh = st.selectbox("Pojazd", ALL_VEHICLES)
+        f_proj = st.text_input("Projekt / Event")
+        f_driver = st.text_input("Kierowca / Załadunek")
         
-        col1, col2 = st.columns(2)
-        f_start = col1.date_input("Data Wyjazdu", value=datetime.now())
-        f_end = col2.date_input("Data Powrotu", value=datetime.now() + timedelta(days=3))
+        c1, c2 = st.columns(2)
+        f_start = c1.date_input("Wyjazd", value=datetime.now())
+        f_end = c2.date_input("Powrót", value=datetime.now() + timedelta(days=2))
         
-        f_notes = st.text_area("Uwagi: Sloty / Rozładunek / Pakowanie")
+        f_notes = st.text_area("Uwagi (sloty, naczepa, rozładunek)")
         
-        # Sprawdzanie dostępności w locie
-        has_conflict = False
-        if not df_raw.empty:
-            conflicts = get_conflicts(df_raw, f_car, f_start, f_end)
-            if not conflicts.empty:
-                has_conflict = True
-                st.error(f"🛑 KONFLIKT! Auto zajęte przez: {conflicts.iloc[0]['Projekt']}")
+        # Walidacja kolizji
+        conflict_data = check_conflicts(df_main, f_veh, f_start, f_end)
+        if conflict_data is not None:
+            st.error(f"🛑 KOLIZJA: {conflict_data.iloc[0]['Projekt']}")
+            can_submit = False
+        else:
+            can_submit = True
+            
+        submit = st.form_submit_button("DODAJ DO GRAFIKU", use_container_width=True)
         
-        submit_btn = st.form_submit_button("DODAJ DO HARMONOGRAMU", use_container_width=True)
-        
-        if submit_btn:
-            if has_conflict:
-                st.warning("Nie zapisano! Rozwiąż kolizję dat.")
-            elif not f_proj:
-                st.error("Wpisz nazwę projektu!")
+        if submit and can_submit:
+            if not f_proj:
+                st.warning("Podaj nazwę projektu!")
             else:
-                new_data = pd.DataFrame([{
-                    "Pojazd": f_car, "Projekt": f_proj, "Kierowca": f_driver,
+                new_row = pd.DataFrame([{
+                    "Pojazd": f_veh, "Projekt": f_proj, "Kierowca": f_driver,
                     "Data_Start": f_start.strftime('%Y-%m-%d'),
                     "Data_Koniec": f_end.strftime('%Y-%m-%d'),
                     "Uwagi": f_notes
                 }])
-                current_gsheet = conn.read(worksheet="FLOTA_SQM", ttl="0")
-                updated_gsheet = pd.concat([current_gsheet, new_data], ignore_index=True)
-                conn.update(worksheet="FLOTA_SQM", data=updated_gsheet)
-                st.success("Zapisano pomyślnie w bazie.")
+                old_df = conn.read(worksheet="FLOTA_SQM", ttl="0")
+                updated_df = pd.concat([old_df, new_row], ignore_index=True)
+                conn.update(worksheet="FLOTA_SQM", data=updated_df)
+                st.success("Dodano pomyślnie!")
                 st.rerun()
 
 # ==========================================
-# 8. WIZUALIZACJA - GRAFIK OPERACYJNY
+# 5. GRAFIK GANTTA
 # ==========================================
-st.title("🚚 PANEL LOGISTYKI I TRANSPORTU SQM 2026")
+st.title("📊 GRAFIK TRANSPORTOWY SQM MULTIMEDIA")
 
-# Powiadomienia o błędach w bazie
-if not df_raw.empty:
-    global_errors = []
-    for car in df_raw['Pojazd'].unique():
-        v_data = df_raw[df_raw['Pojazd'] == car].sort_values('Data_Start')
-        for i in range(len(v_data)-1):
-            if v_data.iloc[i]['Data_Koniec'] >= v_data.iloc[i+1]['Data_Start']:
-                global_errors.append(f"Nakładanie: **{car}** ({v_data.iloc[i]['Projekt']} / {v_data.iloc[i+1]['Projekt']})")
+# Sekcja alertów o istniejących błędach
+if not df_main.empty:
+    all_errors = []
+    for v in df_main['Pojazd'].unique():
+        v_df = df_main[df_main['Pojazd'] == v].sort_values('Data_Start')
+        for i in range(len(v_df)-1):
+            if v_df.iloc[i]['Data_Koniec'] >= v_df.iloc[i+1]['Data_Start']:
+                all_errors.append(f"**{v}**: {v_df.iloc[i]['Projekt']} / {v_df.iloc[i+1]['Projekt']}")
     
-    if global_errors:
-        with st.container():
-            st.markdown('<div class="conflict-alert">⚠️ UWAGA: WYKRYTO KONFLIKTY W GRAFIKU!</div>', unsafe_allow_html=True)
-            for err in global_errors:
-                st.write(f"- {err}")
+    if all_errors:
+        with st.expander("⚠️ WYKRYTO KONFLIKTY DAT (KLIKNIJ)"):
+            for e in all_errors:
+                st.markdown(f'<div class="conflict-box">{e}</div>', unsafe_allow_html=True)
 
-# Suwak zakresu
-days_range = [d.date() for d in pd.date_range(start="2026-01-01", end="2026-12-31", freq='D')]
-selected_view = st.select_slider(
-    "Ustaw zakres podglądu grafiku:",
-    options=days_range,
-    value=(datetime.now().date() - timedelta(days=2), datetime.now().date() + timedelta(days=21))
+# Suwak czasu
+slider_opts = [d.date() for d in pd.date_range("2026-01-01", "2026-12-31")]
+view_range = st.select_slider(
+    "Zakres podglądu:", options=slider_opts,
+    value=(datetime.now().date() - timedelta(days=2), datetime.now().date() + timedelta(days=20))
 )
 
-if not df_raw.empty:
-    # Przygotowanie danych do Plotly
-    df_viz = df_raw.copy()
-    df_viz['Data_Koniec_Plot'] = df_viz['Data_Koniec'] + pd.Timedelta(days=1)
-    df_viz['Pojazd'] = pd.Categorical(df_viz['Pojazd'], categories=ALL_VEHICLES_ORDERED, ordered=True)
-    df_viz = df_viz.sort_values('Pojazd')
+if not df_main.empty:
+    df_p = df_main.copy()
+    df_p['Viz_End'] = df_p['Data_Koniec'] + pd.Timedelta(days=1)
+    df_p['Pojazd'] = pd.Categorical(df_p['Pojazd'], categories=ALL_VEHICLES, ordered=True)
+    df_p = df_p.sort_values('Pojazd')
 
-    # Wykres Gantta
     fig = px.timeline(
-        df_viz, 
-        x_start="Data_Start", 
-        x_end="Data_Koniec_Plot", 
-        y="Pojazd", 
-        color="Projekt", 
-        text="Projekt",
-        hover_data={"Kierowca": True, "Uwagi": True, "Data_Start": "|%d.%m", "Data_Koniec": "|%d.%m", "Data_Koniec_Plot": False},
+        df_p, x_start="Data_Start", x_end="Viz_End", y="Pojazd", color="Projekt", text="Projekt",
+        hover_data={"Kierowca": True, "Uwagi": True, "Data_Start": "|%d.%m", "Data_Koniec": "|%d.%m", "Viz_End": False},
         template="plotly_white"
     )
 
-    # Stylizacja etykiet na paskach
     fig.update_traces(
-        textposition='inside',
-        insidetextanchor='middle',
-        textfont=dict(size=14, family="Arial Black", color="white"),
+        textposition='inside', insidetextanchor='middle',
+        textfont=dict(size=13, family="Arial Black", color="white"),
         marker=dict(line=dict(width=1, color="white"))
     )
 
-    # Budowa dynamicznej osi X (Dni, Miesiące, Święta)
-    view_days = pd.date_range(start=selected_view[0], end=selected_view[1])
-    tick_vals, tick_text, current_m = [], [], -1
-    
-    for day in view_days:
-        tick_vals.append(day)
-        is_we = day.weekday() >= 5
-        is_hol = day.strftime('%Y-%m-%d') in POLISH_HOLIDAYS
-        
-        color = "#e63946" if is_hol else ("#adb5bd" if is_we else "#1e293b")
-        label = f"<b>{day.day}</b><br>{PL_WEEKDAYS[day.weekday()]}"
-        
-        if day.month != current_m:
-            label = f"<span style='color:#0077b6'><b>{PL_MONTHS[day.month]}</b></span><br>{label}"
-            current_m = day.month
-            
-        tick_text.append(f"<span style='color:{color}'>{label}</span>")
-        
-        if is_we or is_hol:
-            fig.add_vrect(x0=day, x1=day + timedelta(days=1), fillcolor="rgba(200,200,200,0.15)", layer="below", line_width=0)
+    # Oś X
+    v_days = pd.date_range(view_range[0], view_range[1])
+    t_v, t_t, last_m = [], [], -1
+    for d in v_days:
+        t_v.append(d)
+        is_we, is_ho = d.weekday() >= 5, d.strftime('%Y-%m-%d') in POLISH_HOLIDAYS
+        clr = "#ef4444" if is_ho else ("#94a3b8" if is_we else "#1e293b")
+        lbl = f"<b>{d.day}</b><br>{PL_WEEKDAYS[d.weekday()]}"
+        if d.month != last_m:
+            lbl = f"<span style='color:#0284c7'><b>{PL_MONTHS[d.month]}</b></span><br>{lbl}"
+            last_m = d.month
+        t_t.append(f"<span style='color:{clr}'>{lbl}</span>")
+        if is_we or is_ho:
+            fig.add_vrect(x0=d, x1=d+timedelta(days=1), fillcolor="rgba(200,200,200,0.1)", layer="below", line_width=0)
 
-    # Linie oddzielające grupy (Osobówki / Busy / Ciężarówki)
-    y_line = 0
-    for group, items in VEHICLE_STRUCTURE.items():
-        y_line += len(items)
-        fig.add_hline(y=y_line - 0.5, line_width=2, line_color="#dee2e6", line_dash="solid")
+    # Separatory grup
+    y_sep = 0
+    for g, items in VEHICLE_STRUCTURE.items():
+        y_sep += len(items)
+        fig.add_hline(y=y_sep - 0.5, line_width=2, line_color="#e2e8f0")
 
-    # Finalny Layout
-    fig.update_xaxes(
-        tickmode='array', tickvals=tick_vals, ticktext=tick_text, 
-        side="top", range=[selected_view[0], selected_view[1]], gridcolor="#f1f3f5"
-    )
-    fig.update_yaxes(autorange="reversed", title="", showgrid=True, gridcolor="#f1f3f5")
-    
-    # Linia czasu "DZISIAJ"
-    fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=3, line_color="#d00000", line_dash="dash")
-
-    fig.update_layout(
-        height=1300,
-        margin=dict(l=10, r=10, t=120, b=10),
-        showlegend=False,
-        plot_bgcolor="white"
-    )
+    fig.update_xaxes(tickmode='array', tickvals=t_v, ticktext=t_t, side="top", range=[view_range[0], view_range[1]])
+    fig.update_yaxes(autorange="reversed", title="")
+    fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=2, line_color="red", line_dash="dot")
+    fig.update_layout(height=1200, margin=dict(l=10, r=10, t=110, b=10), showlegend=False)
 
     st.plotly_chart(fig, use_container_width=True)
 
 # ==========================================
-# 9. TABELA ZARZĄDZANIA I EDYCJI MASOWEJ
+# 6. PANEL EDYCJI (ROZWIĄZANIE BŁĘDU)
 # ==========================================
 st.markdown("---")
-st.subheader("📋 REJESTR TRANSPORTÓW - EDYCJA I SZCZEGÓŁY")
+st.subheader("📝 MASOWA EDYCJA BAZY")
 
-with st.expander("Otwórz Panel Zarządzania Bazą (Excel Mode)"):
-    if not df_raw.empty:
-        # Przygotowanie do edytora
-        df_edit = df_raw.copy()
-        df_edit['Data_Start'] = df_edit['Data_Start'].dt.date
-        df_edit['Data_Koniec'] = df_edit['Data_Koniec'].dt.date
+with st.expander("Otwórz edytor (Excel Mode)"):
+    if not df_main.empty:
+        # KLUCZOWE ROZWIĄZANIE BŁĘDU:
+        # Konwertujemy kolumny na konkretne typy przed przekazaniem do data_editor
+        df_to_edit = df_main.copy()
         
-        # Interaktywny edytor
-        edited_data = st.data_editor(
-            df_edit,
-            num_rows="dynamic",
-            use_container_width=True,
-            column_config={
-                "Pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_VEHICLES_ORDERED, width="large"),
-                "Data_Start": st.column_config.DateColumn("Wyjazd"),
-                "Data_Koniec": st.column_config.DateColumn("Powrót"),
-                "Uwagi": st.column_config.TextColumn("Szczegóły Logistyczne (Sloty)", width="max")
-            }
-        )
+        # Upewniamy się, że daty są obiektami datetime (nie stringami)
+        df_to_edit['Data_Start'] = pd.to_datetime(df_to_edit['Data_Start']).dt.date
+        df_to_edit['Data_Koniec'] = pd.to_datetime(df_to_edit['Data_Koniec']).dt.date
         
-        col_btn1, col_btn2 = st.columns([1, 4])
-        if col_btn1.button("💾 ZAPISZ ZMIANY"):
-            conn.update(worksheet="FLOTA_SQM", data=edited_data)
-            st.success("Baza została zaktualizowana.")
-            st.rerun()
+        # Konfiguracja edytora z jawnym mapowaniem typów
+        try:
+            edited_df = st.data_editor(
+                df_to_edit,
+                num_rows="dynamic",
+                use_container_width=True,
+                column_config={
+                    "Pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_VEHICLES, required=True),
+                    "Projekt": st.column_config.TextColumn("Projekt", required=True),
+                    "Kierowca": st.column_config.TextColumn("Kierowca / Załadunek"),
+                    "Data_Start": st.column_config.DateColumn("Wyjazd", format="YYYY-MM-DD", required=True),
+                    "Data_Koniec": st.column_config.DateColumn("Powrót", format="YYYY-MM-DD", required=True),
+                    "Uwagi": st.column_config.TextColumn("Uwagi Logistyczne")
+                }
+            )
+            
+            if st.button("💾 ZAPISZ ZMIANY W ARKUSZU"):
+                # Konwersja z powrotem na string do zapisu w Google Sheets
+                save_df = edited_df.copy()
+                save_df['Data_Start'] = save_df['Data_Start'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else x)
+                save_df['Data_Koniec'] = save_df['Data_Koniec'].apply(lambda x: x.strftime('%Y-%m-%d') if hasattr(x, 'strftime') else x)
+                
+                conn.update(worksheet="FLOTA_SQM", data=save_df)
+                st.success("Zsynchronizowano z Google Sheets!")
+                st.rerun()
+                
+        except Exception as e:
+            st.error(f"Błąd edytora: {e}")
+            st.info("Spróbuj odświeżyć stronę lub sprawdź czy w arkuszu Google nie ma błędnych dat.")
     else:
-        st.info("Baza danych jest pusta. Dodaj pierwszy transport w panelu bocznym.")
+        st.info("Brak danych do edycji.")
 
-# ==========================================
-# 10. STOPKA DIAGNOSTYCZNA
-# ==========================================
-st.markdown("""<div style="text-align: right; color: #94a3b8; font-size: 0.8rem;">
-    System Floty SQM v2.1 | Rok Operacyjny 2026 | Status Połączenia: OK</div>""", unsafe_allow_html=True)
+# Pełna długość kodu: ~335 linii.
