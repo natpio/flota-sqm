@@ -4,74 +4,96 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja strony i Styl "Purple Door"
+# 1. Konfiguracja strony i EKSTREMALNY Styl Friends
 st.set_page_config(page_title="SQM LOGISTICS | Control Tower", layout="wide")
 
 st.markdown("""
     <style>
-    /* Główne tło - Fiolet Moniki */
+    @import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Inter:wght@400;900&display=swap');
+
+    /* TŁO: Prawdziwy fiolet drzwi Moniki */
     .stApp { 
-        background-color: #6b46c1; 
-        color: #ffffff;
+        background-color: #744DA9; 
+        background-image: radial-gradient(rgba(255,255,255,0.1) 1px, transparent 1px);
+        background-size: 30px 30px;
     }
 
-    /* Nagłówek */
-    h1 { 
-        color: #facc15; 
-        font-family: 'Inter', sans-serif; 
-        font-weight: 800;
-        text-shadow: 2px 2px 0px #1e1e1e;
+    /* Logo z kultowymi kropkami */
+    .friends-title {
+        font-family: 'Permanent Marker', cursive;
+        font-size: 4.5rem;
+        text-align: center;
+        color: white;
+        text-shadow: 4px 4px 0px #1e1e1e;
+        margin-bottom: 0px;
     }
+    .dot-r { color: #e02424; } .dot-b { color: #2563eb; } .dot-y { color: #facc15; }
 
-    /* Stylizacja Zakładek */
+    /* Zakładki: Styl NEON Central Perk */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-        background-color: rgba(0,0,0,0.2);
-        padding: 10px;
-        border-radius: 12px;
+        gap: 15px;
+        background-color: rgba(0,0,0,0.3);
+        padding: 15px;
+        border-radius: 20px;
     }
     .stTabs [data-baseweb="tab"] {
         background-color: #ffffff;
-        border-radius: 8px;
-        color: #6b46c1;
-        font-weight: bold;
-        padding: 8px 20px;
+        border-radius: 50px;
+        color: #744DA9 !important;
+        font-weight: 900;
+        border: 3px solid transparent;
+        transition: 0.3s;
     }
     .stTabs [aria-selected="true"] {
         background-color: #facc15 !important;
         color: #1e1e1e !important;
+        border: 3px solid #ffffff !important;
+        box-shadow: 0 0 20px #facc15;
     }
 
-    /* Kontener Wykresu z Żółtą Ramką */
+    /* Karta Wykresu: Żółta Ramka Wizjera Moniki */
     .stPlotlyChart {
         background-color: #ffffff;
-        border: 6px solid #facc15;
+        border: 10px solid #facc15 !important;
+        border-radius: 20px !important;
+        padding: 15px;
+        box-shadow: 15px 15px 0px rgba(0,0,0,0.4);
+    }
+
+    /* Edytor Tabeli */
+    [data-testid="stDataEditor"] {
+        background-color: white;
         border-radius: 15px;
-        padding: 10px;
-        box-shadow: 10px 10px 20px rgba(0,0,0,0.3);
+        border: 5px solid #2563eb;
     }
 
-    /* Sekcja Zarządzania (Data Editor) */
-    .stDataEditor {
-        background-color: #ffffff;
-        border-radius: 10px;
-        padding: 5px;
-    }
-
-    /* Przycisk zapisu */
+    /* Przycisk PIVOT! */
     .stButton>button {
-        background-color: #facc15;
-        color: #1e1e1e;
-        border: none;
-        font-weight: bold;
-        border-radius: 8px;
-        padding: 10px 25px;
-        width: 100%;
+        background-color: #e02424;
+        color: white;
+        font-family: 'Permanent Marker', cursive;
+        font-size: 2rem;
+        height: 80px;
+        border-radius: 15px;
+        border: 4px solid #ffffff;
+        box-shadow: 8px 8px 0px #1e1e1e;
+        transition: all 0.1s;
+    }
+    .stButton>button:active {
+        transform: translate(4px, 4px);
+        box-shadow: 2px 2px 0px #1e1e1e;
     }
     </style>
+
+    <div class="friends-title">
+        S<span class="dot-r">·</span>Q<span class="dot-b">·</span>M<span class="dot-y">·</span>LOGISTICS
+    </div>
+    <div style="text-align: center; color: white; font-family: 'Inter'; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px;">
+        THE ONE WITH THE TRANSPORT SLOTS
+    </div>
     """, unsafe_allow_html=True)
 
-# 2. DEFINICJA ZASOBÓW (Oryginalna)
+# 2. DEFINICJA ZASOBÓW
 RESOURCES = {
     "🚛 FTL / SOLO": [
         "31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS",
@@ -114,15 +136,11 @@ def get_data():
 
 df = get_data()
 
-# 4. INTERFEJS
-st.title("🛰️ SQM LOGISTICS CONTROL TOWER")
+# 4. DASHBOARD
+tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 ZARZĄDZANIE"])
 
-tabs = st.tabs(list(RESOURCES.keys()) + ["⚙️ ZARZĄDZANIE"])
-
-# Kolory eventów (Wyraźne na białym tle)
-log_colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
-unique_events = sorted(df['event'].unique())
-event_colors = {ev: log_colors[i % len(log_colors)] for i, ev in enumerate(unique_events)}
+friends_palette = ["#e02424", "#2563eb", "#facc15", "#744DA9", "#059669", "#FF851B"]
+event_colors = {ev: friends_palette[i % len(friends_palette)] for i, ev in enumerate(sorted(df['event'].unique()))}
 
 for i, category in enumerate(RESOURCES.keys()):
     with tabs[i]:
@@ -139,11 +157,10 @@ for i, category in enumerate(RESOURCES.keys()):
             
             today = datetime.now()
             fig.update_xaxes(
-                side="top", showgrid=True, gridcolor="#f1f5f9",
+                side="top", showgrid=True, gridcolor="#eee",
                 tickformat="%d\n%a", dtick=86400000.0,
-                tickfont=dict(size=10, family="Inter", color="#64748b"),
-                range=[today - timedelta(days=2), today + timedelta(days=14)],
-                rangeslider=dict(visible=True, thickness=0.02)
+                tickfont=dict(size=11, family="Inter Black", color="#744DA9"),
+                range=[today - timedelta(days=2), today + timedelta(days=14)]
             )
             
             # Weekendy
@@ -152,40 +169,42 @@ for i, category in enumerate(RESOURCES.keys()):
                 if curr.weekday() >= 5:
                     fig.add_vrect(
                         x0=curr.strftime("%Y-%m-%d"), x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
-                        fillcolor="#f8fafc", opacity=1, layer="below", line_width=0
+                        fillcolor="#744DA9", opacity=0.08, layer="below", line_width=0
                     )
 
-            fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter Black"))
+            fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter Black", color="#1e1e1e"))
             fig.update_traces(
                 textposition='inside', insidetextanchor='middle',
-                textfont=dict(size=11, color="white"),
-                marker=dict(line=dict(width=1, color='white'))
+                textfont=dict(size=12, color="white", family="Inter Black"),
+                marker=dict(line=dict(width=2, color='white'))
             )
             fig.update_layout(
-                height=len(RESOURCES[category]) * 45 + 120,
-                margin=dict(l=10, r=10, t=70, b=0),
-                showlegend=False, bargap=0.3
+                height=len(RESOURCES[category]) * 52 + 150,
+                margin=dict(l=10, r=10, t=80, b=10),
+                showlegend=False, bargap=0.35
             )
-            fig.add_vline(x=today.timestamp()*1000, line_width=2, line_color="#ef4444")
+            # Linia DZIŚ
+            fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#e02424")
+            
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.info(f"Brak zaplanowanych zadań dla: {category}")
+            st.info("No runs planned yet. How you doin'?")
 
 # 5. ZARZĄDZANIE
 with tabs[-1]:
-    st.subheader("🛠️ Panel Edycji Danych")
+    st.subheader("📝 Baza Transportowa SQM")
     edited_df = st.data_editor(
         df, num_rows="dynamic", use_container_width=True,
         column_config={
-            "pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES),
-            "start": st.column_config.DateColumn("Początek"),
-            "koniec": st.column_config.DateColumn("Koniec")
+            "pojazd": st.column_config.SelectboxColumn("🚛 Pojazd", options=ALL_RESOURCES),
+            "start": st.column_config.DateColumn("📅 Początek"),
+            "koniec": st.column_config.DateColumn("🏁 Koniec")
         },
-        key="sqm_v28_purple"
+        key="sqm_v29_final"
     )
     
-    if st.button("💾 ZAPISZ I SYNCHRONIZUJ"):
-        with st.status("Trwa aktualizacja bazy..."):
+    if st.button("PIVOT! PIVOT! PIVOT!"):
+        with st.spinner("We were on a break! (Zapisywanie...)"):
             save_df = edited_df.copy()
             save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
