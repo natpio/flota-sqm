@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 # 1. Konfiguracja strony
 st.set_page_config(page_title="SQM Control Tower", layout="wide")
 
-# 2. DEFINICJA ZASOBÓW
+# 2. DEFINICJA ZASOBÓW (Stała lista dla całego systemu)
 RESOURCES = {
     "🚛 FTL / SOLO": [
         "31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS",
@@ -40,32 +40,34 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def get_data():
     try:
         data = conn.read(ttl="0s")
-        # Standaryzacja nazw do małych liter dla kodu
+        # Standaryzacja nazw kolumn do małych liter dla pewności
         data.columns = [c.strip().lower() for c in data.columns]
         
-        # Zapewnienie, że mamy dokładnie te kolumny, których oczekujemy
+        # Oczekiwane kolumny w Google Sheets
         expected = ["pojazd", "event", "start", "koniec", "kierowca", "notatka"]
         for col in expected:
             if col not in data.columns:
                 data[col] = ""
         
-        data = data[expected] # Zachowaj tylko te 6 kolumn
+        data = data[expected].copy()
         data['start'] = pd.to_datetime(data['start'], errors='coerce')
         data['koniec'] = pd.to_datetime(data['koniec'], errors='coerce')
         
         for col in ['pojazd', 'event', 'kierowca', 'notatka']:
             data[col] = data[col].astype(str).replace(['nan', 'None', ''], ' ')
         return data
-    except:
+    except Exception as e:
+        st.error(f"Błąd ładowania danych: {e}")
         return pd.DataFrame(columns=["pojazd", "event", "start", "koniec", "kierowca", "notatka"])
 
 df = get_data()
 
+# 4. INTERFEJS - DASHBOARD
 st.title("🛰️ SQM Logistics Control Center")
 
 tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 ZARZĄDZANIE"])
 
-# Stałe kolory
+# Dynamiczna paleta kolorów
 all_events = sorted(df['event'].unique())
 color_palette = px.colors.qualitative.Prism
 event_colors = {event: color_palette[i % len(color_palette)] for i, event in enumerate(all_events)}
@@ -83,6 +85,7 @@ for i, category in enumerate(RESOURCES.keys()):
                 template="plotly_white"
             )
             
+            # Konfiguracja osi X
             today = datetime.now()
             fig.update_xaxes(
                 side="top", showgrid=True, gridcolor="#E5E5E5",
@@ -92,9 +95,9 @@ for i, category in enumerate(RESOURCES.keys()):
                 rangeslider=dict(visible=True, thickness=0.03)
             )
             
-            # Weekendy
+            # Weekendy (Automatyczne wyszarzenie)
             start_cal = datetime(2026, 1, 1)
-            for d in range(365):
+            for d in range(366): # 2026 ma 365, ale bierzemy margines
                 curr = start_cal + timedelta(days=d)
                 if curr.weekday() >= 5:
                     fig.add_vrect(
@@ -115,13 +118,13 @@ for i, category in enumerate(RESOURCES.keys()):
             fig.add_vline(x=today.timestamp()*1000, line_width=2, line_dash="dash", line_color="red")
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.info(f"Brak danych dla sekcji {category}")
+            st.info(f"Brak zaplanowanych zadań dla sekcji {category}")
 
-# 5. PANEL EDYCJI (Naprawa błędu ValueError)
+# 5. PANEL EDYCJI - ZABEZPIECZONY ZAPIS
 with tabs[-1]:
     st.subheader("📝 Edycja Bazy danych")
     
-    # Edytujemy kopię głównego DF, który ma dokładnie 6 kolumn
+    # Edytor z unikalnym kluczem dla uniknięcia "zamrożenia"
     edited_df = st.data_editor(
         df, 
         num_rows="dynamic", 
@@ -131,26 +134,29 @@ with tabs[-1]:
             "start": st.column_config.DateColumn("Start"),
             "koniec": st.column_config.DateColumn("Koniec")
         },
-        key="editor_v2.3"
+        key="sqm_editor_v24"
     )
     
     if st.button("💾 ZAPISZ ZMIANY"):
-        try:
-            # Tworzymy kopię do zapisu
-            save_df = edited_df.copy()
-            
-            # Upewniamy się, że nie ma żadnych dodatkowych kolumn (np. indeksów)
-            save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
-            
-            # Przywracamy oryginalne nazwy kolumn z Arkusza Google (Wielkie litery)
-            save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-            
-            # Konwersja dat na tekst
-            save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
-            save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
-            
-            conn.update(data=save_df)
-            st.success("Zapisano pomyślnie w Google Sheets!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Błąd podczas zapisu: {e}")
+        with st.spinner("🚀 Trwa synchronizacja z Google Sheets..."):
+            try:
+                # 1. Kopia danych z edytora
+                save_df = edited_df.copy()
+                
+                # 2. Wymuszenie 6 kolumn w poprawnej kolejności (Kluczowe dla uniknięcia ValueError)
+                final_cols = ["pojazd", "event", "start", "koniec", "kierowca", "notatka"]
+                save_df = save_df[final_cols]
+                
+                # 3. Przywrócenie nazw nagłówków zgodnych z arkuszem
+                save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+                
+                # 4. Formatowanie dat do tekstu
+                save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
+                save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
+                
+                # 5. Aktualizacja arkusza
+                conn.update(data=save_df)
+                st.success("✅ Dane pomyślnie zapisane!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Błąd podczas zapisu: {e}")
