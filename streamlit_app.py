@@ -4,21 +4,21 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja strony i EKSTREMALNY Styl Friends
-st.set_page_config(page_title="SQM LOGISTICS | Control Tower", layout="wide")
+# 1. Konfiguracja strony i EKSTREMALNY Styl Friends (v2.9.1)
+st.set_page_config(page_title="SQM FLOTA | The One with the Fleet", layout="wide")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Inter:wght@400;900&display=swap');
 
-    /* TŁO: Prawdziwy fiolet drzwi Moniki */
+    /* TŁO: Głęboki fiolet drzwi Moniki #744DA9 */
     .stApp { 
         background-color: #744DA9; 
         background-image: radial-gradient(rgba(255,255,255,0.1) 1px, transparent 1px);
         background-size: 30px 30px;
     }
 
-    /* Logo z kultowymi kropkami */
+    /* Logo S·Q·M·FLOTA */
     .friends-title {
         font-family: 'Permanent Marker', cursive;
         font-size: 4.5rem;
@@ -51,20 +51,13 @@ st.markdown("""
         box-shadow: 0 0 20px #facc15;
     }
 
-    /* Karta Wykresu: Żółta Ramka Wizjera Moniki */
+    /* Wykres: Gruba Żółta Ramka Wizjera Moniki */
     .stPlotlyChart {
         background-color: #ffffff;
         border: 10px solid #facc15 !important;
         border-radius: 20px !important;
         padding: 15px;
         box-shadow: 15px 15px 0px rgba(0,0,0,0.4);
-    }
-
-    /* Edytor Tabeli */
-    [data-testid="stDataEditor"] {
-        background-color: white;
-        border-radius: 15px;
-        border: 5px solid #2563eb;
     }
 
     /* Przycisk PIVOT! */
@@ -77,23 +70,18 @@ st.markdown("""
         border-radius: 15px;
         border: 4px solid #ffffff;
         box-shadow: 8px 8px 0px #1e1e1e;
-        transition: all 0.1s;
-    }
-    .stButton>button:active {
-        transform: translate(4px, 4px);
-        box-shadow: 2px 2px 0px #1e1e1e;
     }
     </style>
 
     <div class="friends-title">
-        S<span class="dot-r">·</span>Q<span class="dot-b">·</span>M<span class="dot-y">·</span>LOGISTICS
+        S<span class="dot-r">·</span>Q<span class="dot-b">·</span>M<span class="dot-y">·</span>FLOTA
     </div>
     <div style="text-align: center; color: white; font-family: 'Inter'; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px;">
-        THE ONE WITH THE TRANSPORT SLOTS
+        THE ONE WITH THE LOGISTICS SLOTS
     </div>
     """, unsafe_allow_html=True)
 
-# 2. DEFINICJA ZASOBÓW
+# 2. DEFINICJA ZASOBÓW (Pojazdy SQM)
 RESOURCES = {
     "🚛 FTL / SOLO": [
         "31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS",
@@ -119,7 +107,7 @@ RESOURCES = {
 }
 ALL_RESOURCES = [item for sublist in RESOURCES.values() for item in sublist]
 
-# 3. DANE
+# 3. POŁĄCZENIE Z DANYMI
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
@@ -136,7 +124,7 @@ def get_data():
 
 df = get_data()
 
-# 4. DASHBOARD
+# 4. GŁÓWNY PANEL
 tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 ZARZĄDZANIE"])
 
 friends_palette = ["#e02424", "#2563eb", "#facc15", "#744DA9", "#059669", "#FF851B"]
@@ -163,7 +151,7 @@ for i, category in enumerate(RESOURCES.keys()):
                 range=[today - timedelta(days=2), today + timedelta(days=14)]
             )
             
-            # Weekendy
+            # Subtelny efekt tła dla weekendów
             for d in range(366):
                 curr = datetime(2026, 1, 1) + timedelta(days=d)
                 if curr.weekday() >= 5:
@@ -172,7 +160,7 @@ for i, category in enumerate(RESOURCES.keys()):
                         fillcolor="#744DA9", opacity=0.08, layer="below", line_width=0
                     )
 
-            fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter Black", color="#1e1e1e"))
+            fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter Black"))
             fig.update_traces(
                 textposition='inside', insidetextanchor='middle',
                 textfont=dict(size=12, color="white", family="Inter Black"),
@@ -183,14 +171,14 @@ for i, category in enumerate(RESOURCES.keys()):
                 margin=dict(l=10, r=10, t=80, b=10),
                 showlegend=False, bargap=0.35
             )
-            # Linia DZIŚ
+            # Linia "Today"
             fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#e02424")
             
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.info("No runs planned yet. How you doin'?")
+            st.info("How you doin'? Brak danych w tej kategorii.")
 
-# 5. ZARZĄDZANIE
+# 5. PANEL ZARZĄDZANIA
 with tabs[-1]:
     st.subheader("📝 Baza Transportowa SQM")
     edited_df = st.data_editor(
@@ -200,11 +188,11 @@ with tabs[-1]:
             "start": st.column_config.DateColumn("📅 Początek"),
             "koniec": st.column_config.DateColumn("🏁 Koniec")
         },
-        key="sqm_v29_final"
+        key="sqm_flota_v1"
     )
     
     if st.button("PIVOT! PIVOT! PIVOT!"):
-        with st.spinner("We were on a break! (Zapisywanie...)"):
+        with st.spinner("We were on a break! Zapisywanie..."):
             save_df = edited_df.copy()
             save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
