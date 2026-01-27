@@ -4,8 +4,8 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja strony i EKSTREMALNY Styl Friends (v2.9.1)
-st.set_page_config(page_title="SQM FLOTA | The One with the Fleet", layout="wide")
+# 1. Konfiguracja strony i Naprawa UI (v2.9.2)
+st.set_page_config(page_title="SQM FLOTA | Control Tower", layout="wide")
 
 st.markdown("""
     <style>
@@ -14,8 +14,6 @@ st.markdown("""
     /* TŁO: Głęboki fiolet drzwi Moniki #744DA9 */
     .stApp { 
         background-color: #744DA9; 
-        background-image: radial-gradient(rgba(255,255,255,0.1) 1px, transparent 1px);
-        background-size: 30px 30px;
     }
 
     /* Logo S·Q·M·FLOTA */
@@ -26,8 +24,21 @@ st.markdown("""
         color: white;
         text-shadow: 4px 4px 0px #1e1e1e;
         margin-bottom: 0px;
+        padding-top: 20px;
     }
     .dot-r { color: #e02424; } .dot-b { color: #2563eb; } .dot-y { color: #facc15; }
+
+    /* Naprawa suwaków i widoczności edytora */
+    [data-testid="stDataEditor"] {
+        background-color: white !important;
+        border-radius: 10px;
+        border: 4px solid #facc15;
+        overflow: auto !important; /* WYMUSZENIE SUWAKA */
+    }
+    
+    .stTabs [data-baseweb="tab-panel"] {
+        padding-top: 20px;
+    }
 
     /* Zakładki: Styl NEON Central Perk */
     .stTabs [data-baseweb="tab-list"] {
@@ -42,16 +53,14 @@ st.markdown("""
         color: #744DA9 !important;
         font-weight: 900;
         border: 3px solid transparent;
-        transition: 0.3s;
     }
     .stTabs [aria-selected="true"] {
         background-color: #facc15 !important;
         color: #1e1e1e !important;
-        border: 3px solid #ffffff !important;
         box-shadow: 0 0 20px #facc15;
     }
 
-    /* Wykres: Gruba Żółta Ramka Wizjera Moniki */
+    /* Wykres: Żółta Ramka Wizjera Moniki */
     .stPlotlyChart {
         background-color: #ffffff;
         border: 10px solid #facc15 !important;
@@ -66,22 +75,23 @@ st.markdown("""
         color: white;
         font-family: 'Permanent Marker', cursive;
         font-size: 2rem;
-        height: 80px;
+        height: 70px;
         border-radius: 15px;
         border: 4px solid #ffffff;
-        box-shadow: 8px 8px 0px #1e1e1e;
+        box-shadow: 6px 6px 0px #1e1e1e;
+        margin-top: 20px;
     }
     </style>
 
     <div class="friends-title">
-        S<span class="dot-r">·</span>Q<span class="dot-b">·</span>M<span class="dot-y">·</span>FLOTA
+        S<span class="dot-r">·</span>Q<span class="dot-m">·</span>M<span class="dot-y">·</span>FLOTA
     </div>
     <div style="text-align: center; color: white; font-family: 'Inter'; font-weight: 900; margin-bottom: 30px; letter-spacing: 2px;">
         THE ONE WITH THE LOGISTICS SLOTS
     </div>
     """, unsafe_allow_html=True)
 
-# 2. DEFINICJA ZASOBÓW (Pojazdy SQM)
+# 2. DEFINICJA ZASOBÓW
 RESOURCES = {
     "🚛 FTL / SOLO": [
         "31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS",
@@ -107,7 +117,7 @@ RESOURCES = {
 }
 ALL_RESOURCES = [item for sublist in RESOURCES.values() for item in sublist]
 
-# 3. POŁĄCZENIE Z DANYMI
+# 3. DANE
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
@@ -151,15 +161,6 @@ for i, category in enumerate(RESOURCES.keys()):
                 range=[today - timedelta(days=2), today + timedelta(days=14)]
             )
             
-            # Subtelny efekt tła dla weekendów
-            for d in range(366):
-                curr = datetime(2026, 1, 1) + timedelta(days=d)
-                if curr.weekday() >= 5:
-                    fig.add_vrect(
-                        x0=curr.strftime("%Y-%m-%d"), x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
-                        fillcolor="#744DA9", opacity=0.08, layer="below", line_width=0
-                    )
-
             fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter Black"))
             fig.update_traces(
                 textposition='inside', insidetextanchor='middle',
@@ -167,32 +168,35 @@ for i, category in enumerate(RESOURCES.keys()):
                 marker=dict(line=dict(width=2, color='white'))
             )
             fig.update_layout(
-                height=len(RESOURCES[category]) * 52 + 150,
+                height=len(RESOURCES[category]) * 55 + 150,
                 margin=dict(l=10, r=10, t=80, b=10),
                 showlegend=False, bargap=0.35
             )
-            # Linia "Today"
             fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#e02424")
-            
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("How you doin'? Brak danych w tej kategorii.")
+            st.info("No runs planned yet.")
 
-# 5. PANEL ZARZĄDZANIA
+# 5. ZARZĄDZANIE (Z POPRAWIONYM SUWAKIEM)
 with tabs[-1]:
     st.subheader("📝 Baza Transportowa SQM")
-    edited_df = st.data_editor(
-        df, num_rows="dynamic", use_container_width=True,
-        column_config={
-            "pojazd": st.column_config.SelectboxColumn("🚛 Pojazd", options=ALL_RESOURCES),
-            "start": st.column_config.DateColumn("📅 Początek"),
-            "koniec": st.column_config.DateColumn("🏁 Koniec")
-        },
-        key="sqm_flota_v1"
-    )
+    
+    # Dodatkowy kontener dla edytora
+    with st.container():
+        edited_df = st.data_editor(
+            df, 
+            num_rows="dynamic", 
+            use_container_width=True,
+            column_config={
+                "pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_RESOURCES),
+                "start": st.column_config.DateColumn("Start"),
+                "koniec": st.column_config.DateColumn("Koniec")
+            },
+            key="fixed_scroll_editor"
+        )
     
     if st.button("PIVOT! PIVOT! PIVOT!"):
-        with st.spinner("We were on a break! Zapisywanie..."):
+        with st.spinner("Saving..."):
             save_df = edited_df.copy()
             save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
