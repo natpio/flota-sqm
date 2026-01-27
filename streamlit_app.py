@@ -17,10 +17,9 @@ PL_MONTHS = {
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
-    /* Stylizacja dat na osi X */
     [data-testid="stPlotlyChart"] .xtick text { 
         font-family: 'Arial Black', sans-serif !important;
-        font-size: 14px !important;
+        font-size: 13px !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -72,8 +71,17 @@ with st.sidebar:
             conn.update(worksheet="FLOTA_SQM", data=pd.concat([current, new_row], ignore_index=True))
             st.rerun()
 
-# 4. GRAFIK GANTTA - CZYTELNA OŚ CZASU
-st.subheader("🗓️ Harmonogram Dzienny")
+# 4. FILTR ZAKRESU DAT (SUWAK)
+st.subheader("🗓️ Harmonogram Operacyjny")
+
+# Tworzymy suwak do wyboru zakresu widoku
+col_slider, _ = st.columns([0.6, 0.4])
+with col_slider:
+    start_view, end_view = st.select_slider(
+        "Przesuń pasek, aby zmienić zakres podglądu miesięcy:",
+        options=pd.date_range(start="2026-01-01", end="2026-12-31", freq='D'),
+        value=(datetime.now() - timedelta(days=2), datetime.now() + timedelta(days=30))
+    )
 
 if not df.empty:
     df_viz = df.copy()
@@ -85,33 +93,30 @@ if not df.empty:
         hover_data={"Data_Start": "|%d.%m", "Data_Koniec": "|%d.%m", "Status": True, "Projekt": False, "Viz_End": False}
     )
 
-    # --- GENEROWANIE POLSKIEJ OSI CZASU ---
-    # Zakres osi: od najwcześniejszej daty do najpóźniejszej w danych
-    min_date = df['Data_Start'].min() - timedelta(days=2)
-    max_date = df['Data_Koniec'].max() + timedelta(days=14)
-    all_days = pd.date_range(start=min_date, end=max_date)
-
+    # --- GENEROWANIE DYNAMICZNEJ POLSKIEJ OSI X ---
+    # Wyświetlamy etykiety tylko dla wybranego zakresu z suwaka
+    selected_range = pd.date_range(start=start_view, end=end_view)
+    
     tick_vals = []
     tick_text = []
-    current_month = -1
+    last_month = -1
 
-    for d in all_days:
+    for d in selected_range:
         tick_vals.append(d)
-        # Jeśli zmienia się miesiąc, dodaj jego nazwę pod numerem dnia
-        if d.month != current_month:
+        if d.month != last_month:
+            # Nazwa miesiąca pojawia się tylko raz na początku sekcji miesiąca
             tick_text.append(f"<b>{d.day}</b><br><span style='color:#E63946'>{PL_MONTHS[d.month]}</span>")
-            current_month = d.month
+            last_month = d.month
         else:
-            # W pozostałe dni tylko numer dnia
             tick_text.append(f"<b>{d.day}</b>")
 
     fig.update_xaxes(
         tickmode='array',
         tickvals=tick_vals,
         ticktext=tick_text,
-        gridcolor="#E8E8E8",
+        gridcolor="#EEEEEE",
         side="top",
-        range=[datetime.now() - timedelta(days=2), datetime.now() + timedelta(days=21)] # Zoom na 3 tygodnie
+        range=[start_view, end_view]
     )
 
     fig.update_yaxes(autorange="reversed", gridcolor="#F5F5F5", title="")
