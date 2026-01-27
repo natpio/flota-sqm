@@ -3,21 +3,11 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
-import locale
 
-# 1. KONFIGURACJA STRONY I LOKALIZACJI
+# 1. KONFIGURACJA STRONY
 st.set_page_config(page_title="FLOTA SQM 2026", layout="wide", page_icon="🚚")
 
-# Ustawienie języka polskiego dla dat (próba dla różnych systemów)
-try:
-    locale.setlocale(locale.LC_TIME, "pl_PL.UTF-8")
-except:
-    try:
-        locale.setlocale(locale.LC_TIME, "polish")
-    except:
-        pass # Streamlit Cloud czasem ma ograniczone locale, wtedy użyjemy mapowania
-
-# Mapowanie miesięcy na polskie (bezpiecznik)
+# Słownik polskich miesięcy
 PL_MONTHS = {
     1: "STYCZEŃ", 2: "LUTY", 3: "MARZEC", 4: "KWIECIEŃ", 
     5: "MAJ", 6: "CZERWIEC", 7: "LIPIEC", 8: "SIERPIEŃ", 
@@ -27,8 +17,11 @@ PL_MONTHS = {
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
-    /* Stylizacja dla czcionek na osiach */
-    [data-testid="stPlotlyChart"] text { font-family: 'Arial Black', sans-serif !important; }
+    /* Stylizacja dat na osi X */
+    [data-testid="stPlotlyChart"] .xtick text { 
+        font-family: 'Arial Black', sans-serif !important;
+        font-size: 14px !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -73,13 +66,14 @@ with st.sidebar:
         
         if st.form_submit_button("ZAPISZ"):
             new_row = pd.DataFrame([{"Pojazd": pojazd, "Projekt": event_name, "Kierowca": kierowca,
-                                     "Data_Start": d_start, "Data_Koniec": d_end}])
+                                     "Data_Start": d_start.strftime('%Y-%m-%d'), 
+                                     "Data_Koniec": d_end.strftime('%Y-%m-%d')}])
             current = conn.read(worksheet="FLOTA_SQM", ttl="0")
             conn.update(worksheet="FLOTA_SQM", data=pd.concat([current, new_row], ignore_index=True))
             st.rerun()
 
-# 4. GRAFIK GANTTA - NOWA OŚ CZASU
-st.subheader("🗓️ Harmonogram Eventów")
+# 4. GRAFIK GANTTA - CZYTELNA OŚ CZASU
+st.subheader("🗓️ Harmonogram Dzienny")
 
 if not df.empty:
     df_viz = df.copy()
@@ -91,77 +85,59 @@ if not df.empty:
         hover_data={"Data_Start": "|%d.%m", "Data_Koniec": "|%d.%m", "Status": True, "Projekt": False, "Viz_End": False}
     )
 
-    # --- KONFIGURACJA CZYTELNEJ OSI Z MIESIĄCAMI PO POLSKU ---
-    fig.update_xaxes(
-        tickformat="%d",         # Na dole tylko numery dni
-        dtick="D1",              # Linia dla każdego dnia
-        tickfont=dict(size=14, color="black", family="Arial Black"),
-        gridcolor="#E8E8E8",
-        side="top",
-        # Konfiguracja warstwowa (Grupowanie miesięcy)
-        type="date",
-        ticklabelmode="period",  # Ważne dla grupowania
-    )
+    # --- GENEROWANIE POLSKIEJ OSI CZASU ---
+    # Zakres osi: od najwcześniejszej daty do najpóźniejszej w danych
+    min_date = df['Data_Start'].min() - timedelta(days=2)
+    max_date = df['Data_Koniec'].max() + timedelta(days=14)
+    all_days = pd.date_range(start=min_date, end=max_date)
 
-    # Dodanie nazw miesięcy po polsku na górze
-    for m_idx in range(1, 13):
-        # Sprawdzamy czy dany miesiąc występuje w danych, by nie rysować pustych
-        fig.layout.xaxis.calendarmode = "gregorian"
-
-    fig.update_yaxes(autorange="reversed", gridcolor="#F5F5F5")
-    
-    # Czerwona linia 'DZISIAJ'
-    fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=4, line_color="red")
-
-    fig.update_layout(
-        height=600,
-        margin=dict(l=10, r=10, t=120, b=10),
-        showlegend=False,
-        plot_bgcolor="white",
-        # Polskie nazwy miesięcy w dymkach i na osiach poprzez tickformatstops lub bezpośrednie napisy
-    )
-
-    # Ręczne wymuszenie polskich etykiet miesięcy (najbardziej niezawodna metoda w Streamlit)
-    fig.update_xaxes(
-        tickformatstops=[
-            dict(dtickrange=[None, "M1"], value="<b>%d</b><br>"+PL_MONTH_PLACEHOLDER if 'PL_MONTH_PLACEHOLDER' in locals() else "<b>%d</b>")
-        ]
-    )
-    
-    # Prostsza, niezawodna metoda formatowania daty na osi:
-    df_range = pd.date_range(start=df['Data_Start'].min() - timedelta(days=2), 
-                             end=df['Data_Koniec'].max() + timedelta(days=5))
-    
-    # Generujemy etykiety: Dzień + Pogrubiony Miesiąc po polsku (tylko przy zmianie miesiąca)
     tick_vals = []
     tick_text = []
-    last_m = -1
-    for d in df_range:
+    current_month = -1
+
+    for d in all_days:
         tick_vals.append(d)
-        if d.month != last_m:
-            tick_text.append(f"<b>{d.day}</b><br><span style='color:red'>{PL_MONTHS[d.month]}</span>")
-            last_m = d.month
+        # Jeśli zmienia się miesiąc, dodaj jego nazwę pod numerem dnia
+        if d.month != current_month:
+            tick_text.append(f"<b>{d.day}</b><br><span style='color:#E63946'>{PL_MONTHS[d.month]}</span>")
+            current_month = d.month
         else:
+            # W pozostałe dni tylko numer dnia
             tick_text.append(f"<b>{d.day}</b>")
 
     fig.update_xaxes(
+        tickmode='array',
         tickvals=tick_vals,
         ticktext=tick_text,
-        range=[datetime.now() - timedelta(days=3), datetime.now() + timedelta(days=21)] # Widok 3 tyg
+        gridcolor="#E8E8E8",
+        side="top",
+        range=[datetime.now() - timedelta(days=2), datetime.now() + timedelta(days=21)] # Zoom na 3 tygodnie
+    )
+
+    fig.update_yaxes(autorange="reversed", gridcolor="#F5F5F5", title="")
+    
+    # Pionowa linia DZISIAJ
+    fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=3, line_color="red")
+
+    fig.update_layout(
+        height=600,
+        margin=dict(l=10, r=10, t=100, b=10),
+        showlegend=False,
+        plot_bgcolor="white"
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
 # 5. TABELA EDYCJI
 st.markdown("---")
-with st.expander("📝 Lista Eventów i Edycja", expanded=True):
+with st.expander("📝 Lista Eventów i Edycja danych"):
     df_edit = df.copy()
     df_edit['Data_Start'] = df_edit['Data_Start'].dt.date
     df_edit['Data_Koniec'] = df_edit['Data_Koniec'].dt.date
     df_edit = df_edit.rename(columns={"Projekt": "Event"})
     
     edited = st.data_editor(df_edit, num_rows="dynamic", use_container_width=True)
-    if st.button("💾 ZAPISZ ZMIANY"):
+    if st.button("💾 ZAPISZ ZMIANY W BAZIE"):
         conn.update(worksheet="FLOTA_SQM", data=edited.rename(columns={"Event": "Projekt"}))
-        st.success("Zapisano!")
+        st.success("Baza zaktualizowana!")
         st.rerun()
