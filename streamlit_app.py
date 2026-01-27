@@ -6,154 +6,157 @@ from datetime import datetime
 
 # Konfiguracja strony
 st.set_page_config(
-    page_title="SQM Multimedia Solutions - Logistyka",
+    page_title="SQM FLOTA - Panel Logistyczny",
     page_icon="🚛",
     layout="wide"
 )
 
-# Stylizacja CSS dla lepszej czytelności (kontrast jak w Twoim Excelu)
-st.markdown("""
-    <style>
-    .main {
-        background-color: #f5f5f5;
-    }
-    .stMetric {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# Nagłówek SQM
+st.title("🚛 System Zarządzania Flotą SQM")
+st.markdown(f"**Stan na dzień:** {datetime.now().strftime('%d.%m.%Y')}")
+st.divider()
 
-# Inicjalizacja połączenia
-# Kod automatycznie pobierze dane z sekcji [connections.gsheets] w Twoich Secrets
+# Inicjalizacja połączenia z Twoim arkuszem FLOTA_SQM
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def load_data():
-    try:
-        # Odczytujemy dane - upewnij się, że arkusz ma nagłówki: Task, Start, End, Resource, Status
-        data = conn.read(ttl="10s") # krótki cache dla pracy w czasie rzeczywistym
-        # Usuwamy całkowicie puste wiersze
-        data = data.dropna(subset=['Task', 'Start', 'End'])
+def check_conflicts(df):
+    """Funkcja wykrywająca nakładające się terminy dla tego samego pojazdu."""
+    conflicts = []
+    # Sortujemy po pojeździe i dacie startu
+    df_sorted = df.sort_values(['Pojazd', 'Data_Start'])
+    
+    for i in range(len(df_sorted) - 1):
+        current_row = df_sorted.iloc[i]
+        next_row = df_sorted.iloc[i+1]
         
-        # Konwersja dat z obsługą błędów
-        data['Start'] = pd.to_datetime(data['Start'])
-        data['End'] = pd.to_datetime(data['End'])
-        return data
-    except Exception as e:
-        st.error(f"Błąd podczas ładowania danych z Google Sheets: {e}")
-        return pd.DataFrame()
+        # Jeśli ten sam pojazd i daty się zazębiają
+        if current_row['Pojazd'] == next_row['Pojazd']:
+            if current_row['Data_Koniec'] > next_row['Data_Start']:
+                conflicts.append(current_row['Pojazd'])
+    return list(set(conflicts))
 
-# Pobieranie danych
-df = load_data()
+try:
+    # Pobieranie danych z arkusza FLOTA_SQM
+    # ttl="0" pozwala na pobieranie świeżych danych przy każdym odświeżeniu
+    df = conn.read(ttl="0")
+    
+    # Czyszczenie danych (usunięcie pustych wierszy pod tabelą)
+    df = df.dropna(subset=['Pojazd', 'Data_Start', 'Data_Koniec'])
+    
+    # Konwersja dat na format datetime
+    df['Data_Start'] = pd.to_datetime(df['Data_Start'])
+    df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'])
 
-if not df.empty:
-    # --- BOCZNY PANEL (SIDEBAR) ---
-    st.sidebar.image("https://sqm.pl/wp-content/uploads/2018/10/logo_sqm_header.png", width=150) # Przykładowy placeholder logo
-    st.sidebar.header("Zarządzanie Flotą i Slotami")
+    # Wykrywanie konfliktów
+    conflicting_vehicles = check_conflicts(df)
+
+    # --- PANEL BOCZNY (SIDEBAR) ---
+    st.sidebar.header("Filtry i Ustawienia")
     
-    # Filtrowanie daty
-    min_date = df['Start'].min().date()
-    max_date = df['End'].max().date()
+    # Wybór widoku
+    view_mode = st.sidebar.radio("Widok:", ["Harmonogram (Gantt)", "Lista zadań", "Konflikty"])
     
-    st.sidebar.subheader("Zakres czasu")
-    date_range = st.sidebar.date_input(
-        "Wybierz zakres:",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
+    # Filtrowanie pojazdów
+    selected_vehicles = st.sidebar.multiselect(
+        "Filtruj pojazdy:",
+        options=sorted(df['Pojazd'].unique()),
+        default=df['Pojazd'].unique()
     )
 
-    # Filtrowanie zasobów (Pojazdy/Naczepy)
-    all_tasks = sorted(df['Task'].unique())
-    selected_tasks = st.sidebar.multiselect(
-        "Wybierz zasoby (np. naczepy/sloty):",
-        options=all_tasks,
-        default=all_tasks
+    # Filtrowanie projektów
+    selected_projects = st.sidebar.multiselect(
+        "Filtruj projekty:",
+        options=sorted(df['Projekt'].unique()),
+        default=df['Projekt'].unique()
     )
 
-    # Filtrowanie po projektach
-    all_resources = sorted(df['Resource'].unique())
-    selected_resources = st.sidebar.multiselect(
-        "Wybierz projekty/eventy:",
-        options=all_resources,
-        default=all_resources
-    )
+    # Zastosowanie filtrów
+    filtered_df = df[
+        (df['Pojazd'].isin(selected_vehicles)) & 
+        (df['Projekt'].isin(selected_projects))
+    ]
 
-    # Aplikowanie filtrów
-    mask = (df['Task'].isin(selected_tasks)) & \
-           (df['Resource'].isin(selected_resources))
-    
-    # Dodatkowe filtrowanie daty (jeśli wybrano zakres)
-    if len(date_range) == 2:
-        mask = mask & (df['Start'].dt.date >= date_range[0]) & (df['End'].dt.date <= date_range[1])
-    
-    filtered_df = df[mask]
+    # --- GŁÓWNA SEKCJA WIZUALIZACJI ---
 
-    # --- WIDOK GŁÓWNY ---
-    st.title("Harmonogram Logistyczny SQM")
-    
-    # Metryki na górze
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Liczba operacji", len(filtered_df))
-    m2.metric("Aktywne pojazdy", filtered_df['Task'].nunique())
-    m3.metric("Projekty w toku", filtered_df['Resource'].nunique())
-    m4.info("Dane pobrane z Google Cloud")
+    if view_mode == "Harmonogram (Gantt)":
+        if not filtered_df.empty:
+            # Tworzenie wykresu Gantta
+            fig = px.timeline(
+                filtered_df,
+                x_start="Data_Start",
+                x_end="Data_Koniec",
+                y="Pojazd",
+                color="Projekt",
+                hover_data=["Kierowca", "Status", "Uwagi"],
+                title="Obłożenie Floty",
+                text="Projekt",
+                template="plotly_white"
+            )
 
-    # --- WYKRES GANTTA (Plotly) ---
-    if not filtered_df.empty:
-        fig = px.timeline(
-            filtered_df,
-            x_start="Start",
-            x_end="End",
-            y="Task",
-            color="Resource",
-            text="Resource",
-            hover_data=["Status", "Start", "End"],
-            opacity=0.8,
-            template="plotly_white"
+            # Odwrócenie osi Y, aby pojazdy były w kolejności alfabetycznej od góry
+            fig.update_yaxes(autorange="reversed")
+            
+            # Formatowanie osi czasu
+            fig.update_xaxes(
+                dtick="D1", 
+                tickformat="%d.%m",
+                gridcolor='rgba(0,0,0,0.1)'
+            )
+
+            fig.update_layout(
+                height=600,
+                xaxis_title="Kalendarz",
+                yaxis_title="Jednostka transportowa",
+                font=dict(size=12)
+            )
+            
+            # Stylizacja pasków
+            fig.update_traces(textposition='inside', insidetextanchor='middle')
+
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Alert o konfliktach pod wykresem
+            if conflicting_vehicles:
+                st.error(f"⚠️ WYKRYTO KOLIZJE TERMINÓW dla: {', '.join(conflicting_vehicles)}")
+        else:
+            st.warning("Brak danych do wyświetlenia dla wybranych filtrów.")
+
+    elif view_mode == "Lista zadań":
+        st.subheader("Aktualna lista zleceń logistycznych")
+        # Wyświetlamy tabelę z ładnym formatowaniem
+        st.dataframe(
+            filtered_df.sort_values(by="Data_Start"),
+            use_container_width=True,
+            column_config={
+                "Data_Start": st.column_config.DateColumn("Początek", format="DD.MM.YYYY"),
+                "Data_Koniec": st.column_config.DateColumn("Koniec", format="DD.MM.YYYY"),
+                "Pojazd": st.column_config.TextColumn("Pojazd/Naczepa"),
+                "Status": st.column_config.SelectboxColumn(
+                    "Status",
+                    options=["Zaplanowane", "W trasie", "Zakończone", "Auto"]
+                )
+            },
+            hide_index=True
         )
 
-        # Ustawienia estetyczne wykresu
-        fig.update_yaxes(autorange="reversed", title="Zasób / Jednostka transportowa")
-        fig.update_xaxes(
-            title="Oś czasu",
-            dtick="D1", # Tick co jeden dzień
-            tickformat="%d.%m\n%H:%M",
-            gridcolor='LightGrey'
-        )
-        
-        fig.update_layout(
-            height=700,
-            margin=dict(l=20, r=20, t=40, b=20),
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
-        
-        # Dodanie etykiet tekstowych wewnątrz pasków
-        fig.update_traces(textposition='inside', insidetextanchor='middle')
+    elif view_mode == "Konflikty":
+        st.subheader("⚠️ Raport kolizji w harmonogramie")
+        if conflicting_vehicles:
+            conflict_data = df[df['Pojazd'].isin(conflicting_vehicles)].sort_values(['Pojazd', 'Data_Start'])
+            st.write("Poniższe pojazdy mają nałożone na siebie terminy:")
+            st.table(conflict_data[['Pojazd', 'Projekt', 'Data_Start', 'Data_Koniec', 'Kierowca']])
+        else:
+            st.success("Brak konfliktów w harmonogramie. Wszystkie sloty są wolne.")
 
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("Brak danych dla wybranych filtrów.")
+except Exception as e:
+    st.error(f"Problem z odczytem arkusza: {e}")
+    st.info("Sprawdź, czy nazwy kolumn w Google Sheets są identyczne jak w kodzie: Pojazd, Projekt, Data_Start, Data_Koniec, Kierowca, Status, Uwagi")
 
-    # --- SZCZEGÓŁOWA TABELA ---
-    st.subheader("📋 Szczegóły transportów")
-    st.dataframe(
-        filtered_df.sort_values(by="Start"),
-        use_container_width=True,
-        column_config={
-            "Start": st.column_config.DatetimeColumn("Początek", format="DD.MM.YYYY HH:mm"),
-            "End": st.column_config.DatetimeColumn("Koniec", format="DD.MM.YYYY HH:mm"),
-            "Task": "Zasób",
-            "Resource": "Projekt/Klient"
-        }
-    )
-
-else:
-    st.info("Oczekiwanie na dane z arkusza Google... Upewnij się, że dodałeś adres Service Account do udostępniania.")
-
-# Stopka z informacją o wersji
-st.markdown("---")
-st.caption(f"Wersja Systemu 1.0 | Ostatnia synchronizacja: {datetime.now().strftime('%H:%M:%S')}")
+# Stopka
+st.divider()
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("🔄 Odśwież dane"):
+        st.rerun()
+with col2:
+    st.caption("Aplikacja logistyczna SQM Multimedia Solutions | v1.1")
