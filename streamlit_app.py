@@ -36,7 +36,25 @@ ALL_RESOURCES = []
 for items in FLOTA_SQM.values():
     ALL_RESOURCES.extend(items)
 
-# 3. Połączenie z danymi
+# 3. CSS dla "Sticky Header" i przewijania wewnątrz
+st.markdown("""
+    <style>
+    /* Kontener dla wykresu z własnym scrollem */
+    .stPlotlyChart {
+        height: 600px; /* Stała wysokość okna podglądu */
+        overflow-y: auto;
+        overflow-x: hidden;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+    }
+    /* Ukrycie globalnego paska przewijania bocznego jeśli trzeba */
+    section.main {
+        overflow: hidden;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# 4. Połączenie z danymi
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
@@ -71,7 +89,6 @@ if not df.empty:
         category_orders={"pojazd": ALL_RESOURCES}
     )
 
-    # DYNAMIKA OSI X (Rozwiązanie problemu nakładania się dat)
     today = datetime.now()
     initial_start = today - timedelta(days=7)
     initial_end = today + timedelta(days=21)
@@ -80,20 +97,18 @@ if not df.empty:
         side="top",
         gridcolor="#ccd1d9",
         showgrid=True,
-        # Automatyczne dostosowanie: dni przy zbliżeniu, miesiące przy oddaleniu
         tickformatstops=[
-            dict(dtickrange=[None, 86400000 * 30], value="%d %b"), # Poniżej 30 dni: Dzień + Miesiąc
-            dict(dtickrange=[86400000 * 30, None], value="%B %Y")  # Powyżej 30 dni: Pełny Miesiąc
+            dict(dtickrange=[None, 86400000 * 30], value="%d %b"),
+            dict(dtickrange=[86400000 * 30, None], value="%B %Y")
         ],
-        tickfont=dict(size=12, family="Arial Black"),
+        tickfont=dict(size=12, family="Arial Black", color="black"),
         title="",
-        range=[initial_start, initial_end], # Domyślne powiększenie na "teraz"
-        rangeslider=dict(visible=True, thickness=0.04),
+        range=[initial_start, initial_end],
+        rangeslider=dict(visible=True, thickness=0.03), # Cienki suwak na dole
         rangeselector=dict(
             buttons=list([
                 dict(count=14, label="2 TYG", step="day", stepmode="backward"),
                 dict(count=1, label="1 MIES", step="month", stepmode="backward"),
-                dict(count=6, label="6 MIES", step="month", stepmode="backward"),
                 dict(step="all", label="ROK")
             ])
         )
@@ -112,18 +127,21 @@ if not df.empty:
         marker=dict(line=dict(width=1, color='white'))
     )
 
+    # KLUCZOWE: Wysokość musi być duża, by przewijać wewnątrz kontenera 600px
     fig.update_layout(
-        height=len(ALL_RESOURCES) * 35 + 250,
-        margin=dict(l=10, r=10, t=100, b=50),
+        height=len(ALL_RESOURCES) * 40 + 150,
+        margin=dict(l=10, r=10, t=80, b=10),
         showlegend=False,
         bargap=0.4
     )
 
+    # Wyświetlanie wewnątrz kontenera
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # --- PANEL EDYCJI ---
 st.divider()
 st.subheader("📝 Zarządzanie i Rezerwacje")
+# Tutaj edytor ma własny scroll, co nie koliduje z wykresem
 edited_df = st.data_editor(
     df, num_rows="dynamic", use_container_width=True,
     column_config={
@@ -131,7 +149,7 @@ edited_df = st.data_editor(
         "start": st.column_config.DateColumn("Start"),
         "koniec": st.column_config.DateColumn("Koniec")
     },
-    key="sqm_v11_stable"
+    key="sqm_v12_sticky"
 )
 
 if st.button("💾 ZAPISZ I SYNCHRONIZUJ"):
@@ -140,5 +158,5 @@ if st.button("💾 ZAPISZ I SYNCHRONIZUJ"):
     save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
     save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
     conn.update(data=save_df)
-    st.toast("Dane zapisane!", icon="✅")
+    st.toast("Synchronizacja OK!", icon="✅")
     st.rerun()
