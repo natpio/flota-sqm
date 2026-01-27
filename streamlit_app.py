@@ -4,51 +4,54 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja strony i Zaawansowany Styl UI
+# 1. Konfiguracja strony i Clean UI Style
 st.set_page_config(page_title="SQM LOGISTICS | Control Tower", layout="wide")
 
 st.markdown("""
     <style>
-    /* Globalne tło i czcionka */
-    .stApp { background-color: #0e1117; color: #e0e0e0; }
+    /* Tło strony - jasny, profesjonalny szary */
+    .stApp { background-color: #f8f9fa; }
     
-    /* Stylizacja Zakładek (Tabs) */
+    /* Nagłówek aplikacji */
+    h1 { 
+        color: #1e293b; 
+        font-family: 'Inter', sans-serif; 
+        font-weight: 700; 
+        padding-bottom: 1rem;
+    }
+
+    /* Stylizacja Zakładek - Nowoczesne i lekkie */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: #161b22;
-        padding: 10px;
-        border-radius: 10px;
+        gap: 12px;
+        background-color: transparent;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 45px;
-        background-color: #21262d;
-        border-radius: 5px;
-        color: #8b949e;
-        border: none;
-        padding: 0 20px;
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        color: #64748b;
+        padding: 8px 16px;
+        transition: all 0.3s;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #238636 !important;
+        background-color: #3b82f6 !important;
         color: white !important;
-        font-weight: bold;
+        border-color: #3b82f6 !important;
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    }
+
+    /* Karta wykresu */
+    .stPlotlyChart {
+        background-color: #ffffff;
+        border-radius: 12px;
+        padding: 15px;
+        box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+        border: 1px solid #e2e8f0;
     }
     
-    /* Nagłówki i teksty */
-    h1 { color: #58a6ff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight: 800; }
-    .stMarkdown { line-height: 1.2; }
-    
-    /* Schowanie zbędnych elementów Streamlit */
+    /* Ukrycie menu Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
-    /* Kontener Wykresu */
-    .plot-container {
-        border: 1px solid #30363d;
-        border-radius: 12px;
-        background-color: #161b22;
-        padding: 10px;
-    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -79,32 +82,33 @@ RESOURCES = {
 
 ALL_RESOURCES = [item for sublist in RESOURCES.values() for item in sublist]
 
-# 3. DANE
+# 3. LOGIKA DANYCH
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+@st.cache_data(ttl=0)
 def get_data():
     try:
-        data = conn.read(ttl="0s")
+        data = conn.read()
         data.columns = [c.strip().lower() for c in data.columns]
         expected = ["pojazd", "event", "start", "koniec", "kierowca", "notatka"]
         data = data[expected].copy()
         data['start'] = pd.to_datetime(data['start'], errors='coerce')
         data['koniec'] = pd.to_datetime(data['koniec'], errors='coerce')
-        return data.fillna(" ")
+        return data.fillna("")
     except:
         return pd.DataFrame(columns=["pojazd", "event", "start", "koniec", "kierowca", "notatka"])
 
 df = get_data()
 
-# 4. UI
-st.title("🛰️ SQM LOGISTICS | CONTROL TOWER")
+# 4. DASHBOARD UI
+st.title("🛰️ SQM Logistics Control")
 
-tabs = st.tabs([f" {k}" for k in RESOURCES.keys()] + ["⚙️ USTAWIENIA"])
+tabs = st.tabs([f" {k}" for k in RESOURCES.keys()] + ["⚙️ Zarządzanie"])
 
-# Kolory Neonowe dla Eventów
-color_palette = ["#00f2ff", "#7000ff", "#ff007a", "#ccff00", "#ff8a00", "#00ff85"]
+# Pastelowa paleta - wysoka czytelność czarnego tekstu
+logistics_colors = ["#93c5fd", "#86efac", "#fde68a", "#f9a8d4", "#c4b5fd", "#fdba74"]
 unique_events = sorted(df['event'].unique())
-event_colors = {ev: color_palette[i % len(color_palette)] for i, ev in enumerate(unique_events)}
+event_colors = {ev: logistics_colors[i % len(logistics_colors)] for i, ev in enumerate(unique_events)}
 
 for i, (category, items) in enumerate(RESOURCES.items()):
     with tabs[i]:
@@ -116,69 +120,71 @@ for i, (category, items) in enumerate(RESOURCES.items()):
                 color="event", text="event",
                 color_discrete_map=event_colors,
                 category_orders={"pojazd": items},
-                template="plotly_dark"
+                template="plotly_white"
             )
             
-            # Stylizacja osi
             today = datetime.now()
             fig.update_xaxes(
-                side="top", showgrid=True, gridcolor="#30363d",
-                tickformat="%d %b\n%a", dtick=86400000.0,
-                tickfont=dict(size=10, family="Monospace", color="#8b949e"),
+                side="top", showgrid=True, gridcolor="#f1f5f9",
+                tickformat="%d\n%a", dtick=86400000.0,
+                tickfont=dict(size=10, family="Inter, sans-serif", color="#64748b"),
                 range=[today - timedelta(days=2), today + timedelta(days=14)],
-                rangeslider=dict(visible=True, thickness=0.02, bgcolor="#161b22")
+                rangeslider=dict(visible=True, thickness=0.02, bgcolor="#f8f9fa")
             )
             
-            # Weekendy - Ciemniejsze tło
+            # Weekendy - bardzo jasny niebieski/szary
             start_cal = datetime(2026, 1, 1)
             for d in range(366):
                 curr = start_cal + timedelta(days=d)
                 if curr.weekday() >= 5:
                     fig.add_vrect(
                         x0=curr.strftime("%Y-%m-%d"), x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
-                        fillcolor="#0d1117", opacity=0.5, layer="below", line_width=0
+                        fillcolor="#f1f5f9", opacity=1, layer="below", line_width=0
                     )
 
-            fig.update_yaxes(title="", tickfont=dict(size=11, color="#c9d1d9"), gridcolor="#30363d")
+            fig.update_yaxes(
+                title="", 
+                tickfont=dict(size=11, family="Inter", color="#1e293b"),
+                gridcolor="#f1f5f9"
+            )
             
-            # Wygląd pasków - "Glow" effect
             fig.update_traces(
-                textposition='inside', insidetextanchor='middle',
-                textfont=dict(size=12, family="Arial Black", color="white"),
-                marker=dict(line=dict(width=0))
+                textposition='inside',
+                insidetextanchor='middle',
+                textfont=dict(size=11, family="Inter Black", color="#1e293b"), # Ciemny tekst na pastelach
+                marker=dict(line=dict(width=1, color='white'))
             )
             
             fig.update_layout(
-                height=len(items) * 45 + 120,
-                margin=dict(l=10, r=10, t=70, b=0),
-                showlegend=False, bargap=0.4,
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)'
+                height=len(items) * 45 + 100,
+                margin=dict(l=10, r=10, t=60, b=0),
+                showlegend=False, bargap=0.3,
+                plot_bgcolor='white',
+                paper_bgcolor='white'
             )
             
-            # Linia DZIŚ
-            fig.add_vline(x=today.timestamp()*1000, line_width=2, line_dash="solid", line_color="#ff3e3e")
+            # Linia DZIŚ - wyraźny niebieski
+            fig.add_vline(x=today.timestamp()*1000, line_width=2, line_color="#3b82f6")
             
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.info(f"Kategoria {category} jest obecnie pusta.")
+            st.info(f"Brak zaplanowanych zadań dla sekcji {category}")
 
-# 5. PANEL ZARZĄDZANIA
+# 5. ZARZĄDZANIE
 with tabs[-1]:
-    st.subheader("🛠️ Administracja Flotą")
-    with st.expander("📝 Edytuj dane w tabeli", expanded=True):
-        edited_df = st.data_editor(
-            df, num_rows="dynamic", use_container_width=True,
-            column_config={
-                "pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES),
-                "start": st.column_config.DateColumn("Początek"),
-                "koniec": st.column_config.DateColumn("Koniec")
-            },
-            key="sqm_v25_dark"
-        )
+    st.subheader("🛠️ Edycja i Synchronizacja")
+    edited_df = st.data_editor(
+        df, num_rows="dynamic", use_container_width=True,
+        column_config={
+            "pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES),
+            "start": st.column_config.DateColumn("Początek"),
+            "koniec": st.column_config.DateColumn("Koniec")
+        },
+        key="sqm_v26_bright"
+    )
     
-    if st.button("💾 SYNCHRONIZUJ I ODŚWIEŻ"):
-        with st.status("Trwa zapisywanie danych..."):
+    if st.button("💾 ZAPISZ ZMIANY W BAZIE"):
+        with st.status("Aktualizacja danych..."):
             save_df = edited_df.copy()
             save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
