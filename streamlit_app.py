@@ -46,7 +46,11 @@ def load_data():
     df['Status'] = df.apply(lambda x: get_auto_status(x['Data_Start'], x['Data_Koniec']), axis=1)
     return df
 
-df = load_data()
+try:
+    df = load_data()
+except Exception as e:
+    st.error("Błąd ładowania danych. Sprawdź strukturę arkusza.")
+    st.stop()
 
 # 3. SIDEBAR
 with st.sidebar:
@@ -60,8 +64,8 @@ with st.sidebar:
         ])
         event_name = st.text_input("Nazwa Eventu")
         kierowca = st.text_input("Kierowca")
-        d_start = st.date_input("Wyjazd", value=datetime.now())
-        d_end = st.date_input("Powrót", value=datetime.now() + timedelta(days=2))
+        d_start = st.date_input("Wyjazd", value=datetime.now().date())
+        d_end = st.date_input("Powrót", value=(datetime.now() + timedelta(days=2)).date())
         
         if st.form_submit_button("ZAPISZ"):
             new_row = pd.DataFrame([{"Pojazd": pojazd, "Projekt": event_name, "Kierowca": kierowca,
@@ -71,19 +75,30 @@ with st.sidebar:
             conn.update(worksheet="FLOTA_SQM", data=pd.concat([current, new_row], ignore_index=True))
             st.rerun()
 
-# 4. FILTR ZAKRESU DAT (SUWAK)
+# 4. FILTR ZAKRESU DAT (SUWAK) - NAPRAWIONY
 st.subheader("🗓️ Harmonogram Operacyjny")
 
-# Tworzymy suwak do wyboru zakresu widoku
+# Tworzymy listę opcji jako obiekty date (nie Timestamp i nie datetime)
+slider_options = [d.date() for d in pd.date_range(start="2026-01-01", end="2026-12-31", freq='D')]
+
+# Ustalenie wartości domyślnych (muszą być typu date i znajdować się w slider_options)
+default_start = datetime.now().date() - timedelta(days=2)
+default_end = datetime.now().date() + timedelta(days=30)
+
 col_slider, _ = st.columns([0.6, 0.4])
 with col_slider:
-    start_view, end_view = st.select_slider(
-        "Przesuń pasek, aby zmienić zakres podglądu miesięcy:",
-        options=pd.date_range(start="2026-01-01", end="2026-12-31", freq='D'),
-        value=(datetime.now() - timedelta(days=2), datetime.now() + timedelta(days=30))
+    selected_range = st.select_slider(
+        "Przesuń paski, aby zmienić zakres podglądu miesięcy:",
+        options=slider_options,
+        value=(default_start, default_end)
     )
+    start_view, end_view = selected_range
 
 if not df.empty:
+    # Konwersja start_view/end_view na datetime dla Plotly
+    start_dt = pd.to_datetime(start_view)
+    end_dt = pd.to_datetime(end_view)
+    
     df_viz = df.copy()
     df_viz['Viz_End'] = df_viz['Data_Koniec'] + pd.Timedelta(days=1)
 
@@ -94,17 +109,16 @@ if not df.empty:
     )
 
     # --- GENEROWANIE DYNAMICZNEJ POLSKIEJ OSI X ---
-    # Wyświetlamy etykiety tylko dla wybranego zakresu z suwaka
-    selected_range = pd.date_range(start=start_view, end=end_view)
+    # Wyświetlamy etykiety tylko dla wybranego zakresu
+    current_range = pd.date_range(start=start_view, end=end_view)
     
     tick_vals = []
     tick_text = []
     last_month = -1
 
-    for d in selected_range:
+    for d in current_range:
         tick_vals.append(d)
         if d.month != last_month:
-            # Nazwa miesiąca pojawia się tylko raz na początku sekcji miesiąca
             tick_text.append(f"<b>{d.day}</b><br><span style='color:#E63946'>{PL_MONTHS[d.month]}</span>")
             last_month = d.month
         else:
@@ -116,7 +130,7 @@ if not df.empty:
         ticktext=tick_text,
         gridcolor="#EEEEEE",
         side="top",
-        range=[start_view, end_view]
+        range=[start_dt, end_dt]
     )
 
     fig.update_yaxes(autorange="reversed", gridcolor="#F5F5F5", title="")
