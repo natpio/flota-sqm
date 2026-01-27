@@ -3,6 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
+import re
 
 # ==========================================
 # 1. KONFIGURACJA STRONY I ZAAWANSOWANE STYLE CSS
@@ -24,9 +25,9 @@ st.markdown("""
         background-color: #ffe5e5; border-left: 5px solid #d90429;
         padding: 15px; margin: 10px 0; border-radius: 4px; color: #2b2d42;
     }
-    .debug-card {
-        background-color: #e9ecef; border-left: 5px solid #6c757d;
-        padding: 10px; margin: 5px 0; font-family: monospace; font-size: 0.8rem;
+    .diag-box {
+        background-color: #e9ecef; border: 1px solid #ced4da;
+        padding: 10px; border-radius: 5px; font-family: monospace; font-size: 0.85rem;
     }
     [data-testid="stPlotlyChart"] .xtick text { 
         font-family: 'Arial Black', sans-serif !important; font-size: 11px !important;
@@ -35,7 +36,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. LOKALIZACJA I STRUKTURA FLOTY
+# 2. LOKALIZACJA I STRUKTURA FLOTY SQM
 # ==========================================
 PL_MONTHS = {1: "STYCZEŃ", 2: "LUTY", 3: "MARZEC", 4: "KWIECIEŃ", 5: "MAJ", 6: "CZERWIEC", 
              7: "LIPIEC", 8: "SIERPIEŃ", 9: "WRZESIEŃ", 10: "PAŹDZIERNIK", 11: "LISTOPAD", 12: "GRUDZIEŃ"}
@@ -65,54 +66,65 @@ VEHICLE_STRUCTURE = {
     "MIESZKANIA BCN": ["MIESZKANIE BCN - TORRASA", "MIESZKANIE BCN - ARGENTINA (PM)"]
 }
 
-# Tworzenie czystej listy do porównań
 SORTED_LIST = [v for sub in VEHICLE_STRUCTURE.values() for v in sub]
 
 # ==========================================
-# 3. SILNIK DANYCH Z AUTOKOREKTĄ
+# 3. SILNIK DANYCH Z FUNKCJĄ FUZZY CLEANING
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
+
+def clean_string(s):
+    """Usuwa wszystko co nie jest literą lub cyfrą do porównania"""
+    if pd.isna(s): return ""
+    return re.sub(r'[^a-zA-Z0-9]', '', str(s)).upper()
 
 def get_db_data():
     try:
         df = conn.read(worksheet="FLOTA_SQM", ttl="0")
         if df.empty: return pd.DataFrame()
         
-        # 1. Standaryzacja nazw kolumn (usuwanie spacji z nagłówków)
-        df.columns = df.columns.str.strip()
+        # Standaryzacja nazw kolumn
+        df.columns = [c.strip() for c in df.columns]
         
-        # 2. Autokorekta nazw pojazdów (usuwanie spacji z danych)
-        df['Pojazd'] = df['Pojazd'].astype(str).str.strip()
-        
-        # 3. Konwersja dat
+        # Konwersja dat
         df['Data_Start'] = pd.to_datetime(df['Data_Start'], errors='coerce')
         df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'], errors='coerce')
         
-        # 4. Czyszczenie błędnych wierszy
-        valid_df = df.dropna(subset=['Pojazd', 'Data_Start', 'Data_Koniec']).copy()
+        # Krytyczne czyszczenie: Dopasowanie nazw pojazdów mimo błędów w Excelu
+        # Mapujemy uproszczone nazwy z listy SQM na ich pełne brzmienie
+        mapping = {clean_string(v): v for v in SORTED_LIST}
         
-        return valid_df
+        def find_correct_name(val):
+            cleaned = clean_string(val)
+            return mapping.get(cleaned, val) # Zwraca oryginał jeśli nie znajdzie dopasowania
+            
+        df['Pojazd'] = df['Pojazd'].apply(find_correct_name)
+        
+        # Usunięcie wierszy bez dat
+        df = df.dropna(subset=['Data_Start', 'Data_Koniec'])
+        return df
     except Exception as e:
-        st.error(f"Błąd krytyczny bazy: {e}")
+        st.error(f"Błąd bazy: {e}")
         return pd.DataFrame()
 
 df_main = get_db_data()
 
 # ==========================================
-# 4. DIAGNOSTYKA (UKRYTA DOMYŚLNIE)
+# 4. KONSOLA DIAGNOSTYCZNA (PODGLĄD BŁĘDÓW)
 # ==========================================
-with st.expander("🔍 KONSOLA DIAGNOSTYCZNA (Sprawdź, jeśli nie widzisz paska)"):
+with st.expander("🔍 DIAGNOSTYKA SYNC (Otwórz jeśli nie widzisz danych)"):
     if not df_main.empty:
-        st.write("Wczytane unikalne pojazdy z Twojego Excela:")
-        excel_cars = df_main['Pojazd'].unique()
-        for ec in excel_cars:
-            if ec in SORTED_LIST:
-                st.write(f"✅ {ec} - OK")
-            else:
-                st.error(f"❌ '{ec}' - TA NAZWA NIE PASUJE DO LISTY W KODZIE! Sprawdź myślniki lub spacje.")
+        st.write("Wykryte kolumny:", list(df_main.columns))
+        invalid_cars = df_main[~df_main['Pojazd'].isin(SORTED_LIST)]['Pojazd'].unique()
+        if len(invalid_cars) > 0:
+            st.error("Poniższe nazwy w Excelu są błędne i nie pasują do grafiku:")
+            for ic in invalid_cars:
+                st.code(f"'{ic}'")
+        else:
+            st.success("Wszystkie nazwy pojazdów zsynchronizowane poprawnie.")
 
 # ==========================================
-# 5. LOGIKA KOLIZJI (DOUBLE BOOKING)
+# 5. LOGIKA KOLIZJI (CONFLICT DETECTOR)
 # ==========================================
 def check_overlapping(df, vehicle, start, end):
     s_dt, e_dt = pd.to_datetime(start), pd.to_datetime(end)
@@ -124,12 +136,12 @@ def check_overlapping(df, vehicle, start, end):
     return conflicts
 
 # ==========================================
-# 6. SIDEBAR - FORMULARZ
+# 6. SIDEBAR - DODAWANIE
 # ==========================================
 with st.sidebar:
-    st.markdown('<p class="sidebar-header">⚙️ DODAJ TRANSPORT</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sidebar-header">⚙️ NOWY TRANSPORT</p>', unsafe_allow_html=True)
     with st.form("transport_form"):
-        v_choice = st.selectbox("Wybierz Pojazd", SORTED_LIST)
+        v_choice = st.selectbox("Pojazd", SORTED_LIST)
         p_name = st.text_input("Projekt / Event")
         k_name = st.text_input("Kierowca / Załadunek")
         c1, c2 = st.columns(2)
@@ -143,9 +155,9 @@ with st.sidebar:
                 conflict_exists = True
                 st.error(f"❌ KOLIZJA: {conflicts.iloc[0]['Projekt']}")
         
-        if st.form_submit_button("ZAPISZ"):
+        if st.form_submit_button("DODAJ DO GRAFIKU"):
             if not p_name or conflict_exists:
-                st.warning("Popraw dane przed zapisem!")
+                st.warning("Uzupełnij projekt lub napraw kolizję!")
             else:
                 new_row = pd.DataFrame([{
                     "Pojazd": v_choice, "Projekt": p_name, "Kierowca": k_name,
@@ -161,17 +173,17 @@ with st.sidebar:
 # ==========================================
 st.title("🚚 GRAFIK OPERACYJNY SQM 2026")
 
-# Wyświetlanie globalnych konfliktów
+# Alerty o istniejących nałożeniach
 if not df_main.empty:
     found_conflicts = []
     for car in df_main['Pojazd'].unique():
         subset = df_main[df_main['Pojazd'] == car].sort_values('Data_Start')
         for i in range(len(subset)-1):
             if subset.iloc[i]['Data_Koniec'] >= subset.iloc[i+1]['Data_Start']:
-                found_conflicts.append(f"<b>{car}</b>: {subset.iloc[i]['Projekt']} / {subset.iloc[i+1]['Projekt']}")
+                found_conflicts.append(f"<b>{car}</b>: {subset.iloc[i]['Projekt']} i {subset.iloc[i+1]['Projekt']}")
     
     if found_conflicts:
-        st.subheader("⚠️ Wykryto nałożenia w grafiku!")
+        st.subheader("⚠️ Konflikty w datach!")
         for fc in found_conflicts:
             st.markdown(f'<div class="conflict-card">{fc}</div>', unsafe_allow_html=True)
 
@@ -181,10 +193,10 @@ v_range = st.select_slider("Widok:", options=slider_days, value=(datetime.now().
 
 if not df_main.empty:
     df_plot = df_main.copy()
-    # Kluczowe: Dodajemy 1 dzień, żeby Plotly poprawnie domknęło prostokąt daty końcowej
+    # Korekta wizualna: dodanie 1 dnia do końca, by pasek obejmował cały ostatni dzień
     df_plot['Data_Koniec_Viz'] = df_plot['Data_Koniec'] + pd.Timedelta(days=1)
     
-    # Sortowanie osi Y według hierarchii firmy
+    # Sortowanie osi Y
     df_plot['Pojazd'] = pd.Categorical(df_plot['Pojazd'], categories=SORTED_LIST, ordered=True)
     df_plot = df_plot.sort_values('Pojazd')
 
@@ -200,7 +212,7 @@ if not df_main.empty:
         marker=dict(line=dict(width=1, color="white"))
     )
 
-    # Budowa osi X z polskimi nazwami
+    # Budowa osi X
     timeline_range = pd.date_range(start=v_range[0], end=v_range[1])
     t_vals, t_text, last_m = [], [], -1
     for d in timeline_range:
@@ -215,7 +227,7 @@ if not df_main.empty:
         if is_we or is_hol:
             fig.add_vrect(x0=d, x1=d + timedelta(days=1), fillcolor="rgba(200,200,200,0.15)", layer="below", line_width=0)
 
-    # Linie separatorów grup (Osobówki/Busy/TIRy)
+    # Linie separatorów grup
     y_pos = 0
     for grp, vlist in VEHICLE_STRUCTURE.items():
         y_pos += len(vlist)
