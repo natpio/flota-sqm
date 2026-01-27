@@ -51,7 +51,6 @@ def get_data():
 
 df = get_data()
 
-# 4. INTERFEJS
 st.title("🛰️ SQM Logistics Control Center")
 
 tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 ZARZĄDZANIE"])
@@ -73,60 +72,52 @@ for i, category in enumerate(RESOURCES.keys()):
             template="plotly_white"
         )
         
-        # --- NOWA KONFIGURACJA OSI X (MIESIĄC + DZIEŃ) ---
+        # --- STABILNA KONFIGURACJA OSI X ---
         today = datetime.now()
         fig.update_xaxes(
             side="top",
             showgrid=True,
             gridcolor="#E5E5E5",
-            # Główne formatowanie (Dzień + Nazwa Dnia)
-            tickformat="%d\n%a",
+            # Uproszczony format: Dzień, skrót dnia i miesiąc w jednej linii dla stabilności
+            tickformat="%d %b\n%a",
             dtick=86400000.0, # Co 1 dzień
-            tickfont=dict(size=11, family="Arial Black", color="black"),
-            # Dodanie paska z Miesiącem
-            minor=dict(
-                dtick="M1", # Co 1 miesiąc
-                tickformat="%B %Y",
-                tickfont=dict(size=14, family="Arial Black", color="#1a73e8"),
-                showgrid=False
-            ),
+            tickfont=dict(size=10, family="Arial Black", color="black"),
             range=[today - timedelta(days=3), today + timedelta(days=18)],
-            rangeslider=dict(visible=True, thickness=0.02)
+            rangeslider=dict(visible=True, thickness=0.03)
         )
         
         # --- PODŚWIETLENIE WEEKENDÓW ---
-        # Generujemy tło dla sobót i niedziel na cały 2026 rok
-        start_y = datetime(2026, 1, 1)
+        # Bezpieczne generowanie tła weekendów (sobota-niedziela)
+        start_cal = datetime(2026, 1, 1)
         for d in range(365):
-            curr = start_y + timedelta(days=d)
-            if curr.weekday() >= 5: # 5 = Sobota, 6 = Niedziela
+            curr = start_cal + timedelta(days=d)
+            if curr.weekday() >= 5:
                 fig.add_vrect(
                     x0=curr.strftime("%Y-%m-%d"), 
                     x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
-                    fillcolor="#F0F0F0", 
+                    fillcolor="#F5F5F5", 
                     opacity=1.0, 
                     layer="below", 
                     line_width=0
                 )
 
-        # Oś Y i stylizacja
-        fig.update_yaxes(title="", tickfont=dict(size=12))
+        fig.update_yaxes(title="", tickfont=dict(size=11))
         fig.update_traces(
             textposition='inside',
             insidetextanchor='middle',
-            textfont=dict(size=13, family="Arial Black"),
+            textfont=dict(size=12, family="Arial Black"),
             marker=dict(line=dict(width=1, color='white'))
         )
         
         fig.update_layout(
-            height=len(RESOURCES[category]) * 42 + 180,
-            margin=dict(l=10, r=10, t=110, b=10),
+            height=len(RESOURCES[category]) * 40 + 150,
+            margin=dict(l=10, r=10, t=80, b=10),
             showlegend=False,
             bargap=0.35
         )
         
         # Linia "DZISIAJ"
-        fig.add_vline(x=today.timestamp()*1000, line_width=3, line_dash="dash", line_color="red")
+        fig.add_vline(x=today.timestamp()*1000, line_width=2, line_dash="dash", line_color="red")
         
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
@@ -140,7 +131,7 @@ with tabs[-1]:
             "start": st.column_config.DateColumn("Start"),
             "koniec": st.column_config.DateColumn("Koniec")
         },
-        key="editor_v2.2"
+        key="editor_final_v1"
     )
     
     if st.button("💾 ZAPISZ ZMIANY"):
@@ -149,5 +140,5 @@ with tabs[-1]:
         save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
         save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
         conn.update(data=save_df)
-        st.success("Zapisano!")
+        st.success("Dane zapisane w Google Sheets!")
         st.rerun()
