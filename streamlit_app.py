@@ -5,10 +5,9 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # 1. Konfiguracja strony
-st.set_page_config(page_title="SQM Fleet & Housing Center", page_icon="🚚", layout="wide")
+st.set_page_config(page_title="SQM Fleet & Housing Center", page_icon="🚛", layout="wide")
 
 # 2. DEFINICJA ZASOBÓW (Stała lista osi Y)
-# Klucz to kategoria, wartość to lista nazw tak jak w arkuszu
 FLOTA_SQM = {
     "FTL / SOLO": [
         "31 -TIR PZ1V388/PZ2K300 STABLEWSKI",
@@ -53,10 +52,9 @@ FLOTA_SQM = {
     ]
 }
 
-# Tworzymy płaską listę do sortowania osi Y na wykresie
 ALL_RESOURCES = []
-for category in FLOTA_SQM:
-    ALL_RESOURCES.extend(FLOTA_SQM[category])
+for items in FLOTA_SQM.values():
+    ALL_RESOURCES.extend(items)
 
 # 3. Połączenie i ładowanie danych
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -77,17 +75,9 @@ def load_data():
 
 df = load_data()
 
-st.title("🛰️ SQM Logistics & Housing Control")
+st.title("🛰️ SQM Fleet & Housing Control")
 
 if not df.empty:
-    # Przypisanie kategorii do danych dla lepszego filtrowania/kolorowania (opcjonalnie)
-    def get_category(res):
-        for cat, items in FLOTA_SQM.items():
-            if res in items: return cat
-        return "INNE"
-    
-    df['kategoria'] = df['pojazd'].apply(get_category)
-
     # --- LOGIKA KOLORÓW DLA EVENTÓW ---
     unique_events = sorted(df['event'].unique())
     color_palette = px.colors.qualitative.Prism
@@ -104,20 +94,45 @@ if not df.empty:
         text="event",
         hover_name="event",
         template="plotly_white",
-        category_orders={"pojazd": ALL_RESOURCES} # WYMUSZENIE KOLEJNOŚCI OSI Y
+        category_orders={"pojazd": ALL_RESOURCES}
     )
 
-    # Oś X
+    # KONFIGURACJA OSI X (Daty, Suwak, Przyciski)
     fig.update_xaxes(
-        side="top", dtick="D1", gridcolor="#ccd1d9", showgrid=True,
-        tickformat="%d\n%a", tickfont=dict(size=11, family="Arial Black"), title=""
+        side="top", # Etykiety na górze
+        dtick="D1",
+        gridcolor="#ccd1d9",
+        showgrid=True,
+        tickformat="%d\n%a", 
+        tickfont=dict(size=11, family="Arial Black"),
+        title="",
+        # DODANIE SUWAKA I PRZYCISKÓW
+        rangeslider=dict(visible=True, thickness=0.05),
+        rangeselector=dict(
+            buttons=list([
+                dict(count=7, label="TYDZIEŃ", step="day", stepmode="backward"),
+                dict(count=1, label="1 MIESIĄC", step="month", stepmode="backward"),
+                dict(count=6, label="6 MIESIĘCY", step="month", stepmode="backward"),
+                dict(step="all", label="CAŁY ROK")
+            ]),
+            y=1.1 # Pozycja przycisków nad osią
+        )
     )
 
-    # Oś Y - Dodanie linii pomocniczych między grupami
     fig.update_yaxes(gridcolor="#f1f3f5", title="", tickfont=dict(size=10))
 
     # Linia DZISIAJ
     fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=2, line_dash="dash", line_color="red")
+
+    # Weekendy
+    min_date = datetime(2026, 1, 1)
+    max_date = datetime(2026, 12, 31)
+    curr = min_date
+    while curr <= max_date:
+        if curr.weekday() >= 5:
+            fig.add_vrect(x0=curr.strftime("%Y-%m-%d"), x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
+                          fillcolor="#f8f9fa", opacity=1.0, layer="below", line_width=0)
+        curr += timedelta(days=1)
 
     # Wygląd bloków
     fig.update_traces(
@@ -127,39 +142,35 @@ if not df.empty:
         marker=dict(line=dict(width=1, color='white'))
     )
 
-    # Layout
+    # Layout z uwzględnieniem suwaka
     fig.update_layout(
-        height=len(ALL_RESOURCES) * 30 + 150, # Wysokość zależna od liczby aut
-        margin=dict(l=10, r=10, t=100, b=10),
+        height=len(ALL_RESOURCES) * 35 + 250,
+        margin=dict(l=10, r=10, t=150, b=50),
         showlegend=False,
         bargap=0.4
     )
 
+    # WYŚWIETLANIE WYKRESU
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # --- PANEL OPERACYJNY ---
 st.divider()
-col_left, col_right = st.columns([4, 1])
+st.subheader("📝 Edycja i Rezerwacje")
+edited_df = st.data_editor(
+    df, num_rows="dynamic", use_container_width=True,
+    column_config={
+        "pojazd": st.column_config.SelectboxColumn("Zasób SQM", options=ALL_RESOURCES, width="large"),
+        "start": st.column_config.DateColumn("Start"),
+        "koniec": st.column_config.DateColumn("Koniec")
+    },
+    key="sqm_v9_sticky"
+)
 
-with col_left:
-    st.subheader("📝 Baza Operacyjna")
-    edited_df = st.data_editor(
-        df, num_rows="dynamic", use_container_width=True,
-        column_config={
-            "pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES, width="large"),
-            "start": st.column_config.DateColumn("Start"),
-            "koniec": st.column_config.DateColumn("Koniec")
-        },
-        key="sqm_v8_final"
-    )
-
-with col_right:
-    st.subheader("Akcja")
-    if st.button("💾 ZAPISZ"):
-        save_df = edited_df.drop(columns=['kategoria']).copy()
-        save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-        save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d').fillna('')
-        save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d').fillna('')
-        conn.update(data=save_df)
-        st.success("Zrobione!")
-        st.rerun()
+if st.button("💾 ZAPISZ ZMIANY"):
+    save_df = edited_df.copy()
+    save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+    save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d').fillna('')
+    save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d').fillna('')
+    conn.update(data=save_df)
+    st.success("Baza zaktualizowana!")
+    st.rerun()
