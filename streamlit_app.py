@@ -88,7 +88,7 @@ with st.sidebar:
             st.rerun()
 
 # 4. GRAFIK GANTTA - KAŻDY EVENT INNY KOLOR
-st.subheader("🗓️ Harmonogram Eventów (Kolorowanie wg Projektu)")
+st.subheader("🗓️ Harmonogram Eventów")
 
 if not df.empty:
     df_viz = df.copy()
