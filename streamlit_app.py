@@ -1,161 +1,181 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
-from st_gsheets_connection import GSheetsConnection
-from datetime import date
+from datetime import datetime, timedelta
 
-# --------------------------------------------------
-# CONFIG
-# --------------------------------------------------
+# 1. KONFIGURACJA STRONY - MUSI BYĆ NA SAMEJ GÓRZE
 st.set_page_config(
-    page_title="Flota SQM – Planowanie",
+    page_title="SQM Fleet Dashboard",
+    page_icon="🚛",
     layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-SHEET_NAME = "FLOTA_SQM"
+# 2. ZAAWANSOWANA STYLIZACJA CSS (Profesjonalny UI)
+st.markdown("""
+    <style>
+    /* Tło główne */
+    .stApp { background-color: #F8FAFC; }
+    
+    /* Ciemny Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #0F172A !important;
+        color: white !important;
+    }
+    [data-testid="stSidebar"] .stMarkdown, [data-testid="stSidebar"] label {
+        color: #E2E8F0 !important;
+    }
+    
+    /* Karty metryk (KPI) */
+    div[data-testid="metric-container"] {
+        background-color: white;
+        padding: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        border: 1px solid #E2E8F0;
+    }
+    
+    /* Stylizacja zakładek */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #F1F5F9;
+        border-radius: 8px 8px 0 0;
+        padding: 10px 20px;
+        font-weight: 600;
+        color: #475569;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #2563EB !important;
+        color: white !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-STATUS_COLORS = {
-    "BCN": "#d81b60",
-    "Magazyn": "#fbc02d",
-    "Serwis": "#616161",
-    "Event": "#1e88e5",
-    "Transport": "#43a047",
-}
+# 3. POŁĄCZENIE Z DANYMI
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --------------------------------------------------
-# DATA
-# --------------------------------------------------
-@st.cache_data(ttl=5)
 def load_data():
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(worksheet=SHEET_NAME)
-
-    df["Data_Start"] = pd.to_datetime(df["Data_Start"])
-    df["Data_Koniec"] = pd.to_datetime(df["Data_Koniec"])
-    df["ID"] = df.index
-
+    # Pobieranie danych z arkusza FLOTA_SQM
+    df = conn.read(ttl="2s")
+    # Usuwamy całkowicie puste wiersze
+    df = df.dropna(subset=['Pojazd', 'Data_Start', 'Data_Koniec'])
+    # Konwersja dat
+    df['Data_Start'] = pd.to_datetime(df['Data_Start'])
+    df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'])
     return df
 
+try:
+    df = load_data()
 
-def save_data(df):
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    conn.update(worksheet=SHEET_NAME, data=df.drop(columns=["ID"]))
+    # --- PANEL BOCZNY (SIDEBAR) ---
+    with st.sidebar:
+        st.markdown("<h2 style='text-align: center; color: white;'>SQM FLOTA</h2>", unsafe_allow_html=True)
+        st.divider()
+        
+        st.markdown("### ⚙️ KONFIGURACJA")
+        search = st.text_input("🔍 Szukaj projektu/auta")
+        
+        # Wybór statusów do wyświetlenia
+        status_options = sorted(df['Status'].unique().tolist())
+        selected_status = st.multiselect("Statusy:", options=status_options, default=status_options)
+        
+        st.divider()
+        if st.button("🔄 Odśwież system", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+            
+        st.caption("v3.1 | System Operacyjny SQM")
 
+    # --- NAGŁÓWEK I KPI ---
+    st.markdown("<h1 style='color: #1E293B;'>Pulpit Operacyjny Floty</h1>", unsafe_allow_html=True)
+    st.caption(f"Synchronizacja: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
 
-df = load_data()
+    # Obliczenia do metryk
+    today = pd.Timestamp.now().normalize()
+    active_now = df[(df['Data_Start'] <= today) & (df['Data_Koniec'] >= today)].shape[0]
+    
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Łączna flota", df['Pojazd'].nunique())
+    m2.metric("Projekty w toku", df['Projekt'].nunique())
+    m3.metric("W trasie (dziś)", active_now)
+    m4.metric("Zaplanowane (7d)", df[df['Data_Start'] > today].shape[0])
 
-# --------------------------------------------------
-# SIDEBAR – FILTRY
-# --------------------------------------------------
-st.sidebar.header("🔍 Filtry")
+    st.markdown("<br>", unsafe_allow_html=True)
 
-pojazd_f = st.sidebar.multiselect(
-    "Pojazd",
-    sorted(df["Pojazd"].dropna().unique()),
-)
+    # --- FILTROWANIE ---
+    filtered_df = df[
+        (df['Projekt'].astype(str).str.contains(search, case=False) | 
+         df['Pojazd'].astype(str).str.contains(search, case=False)) &
+        (df['Status'].isin(selected_status))
+    ]
 
-projekt_f = st.sidebar.multiselect(
-    "Projekt",
-    sorted(df["Projekt"].dropna().unique()),
-)
+    # --- GŁÓWNA SEKCJA (TABS) ---
+    tab_gantt, tab_table, tab_alerts = st.tabs(["📅 Widok Harmonogramu", "📋 Tabela Szczegółowa", "🚨 Konflikty"])
 
-kierowca_f = st.sidebar.multiselect(
-    "Kierowca",
-    sorted(df["Kierowca"].dropna().unique()),
-)
+    with tab_gantt:
+        st.markdown("<div style='background-color: white; padding: 20px; border-radius: 12px; border: 1px solid #E2E8F0;'>", unsafe_allow_html=True)
+        if not filtered_df.empty:
+            fig = px.timeline(
+                filtered_df,
+                x_start="Data_Start",
+                x_end="Data_Koniec",
+                y="Pojazd",
+                color="Projekt",
+                text="Projekt",
+                hover_data=["Kierowca", "Status", "Uwagi"],
+                template="plotly_white",
+                color_discrete_sequence=px.colors.qualitative.Safe
+            )
+            
+            # Linia aktualnego czasu
+            fig.add_vline(x=datetime.now(), line_width=2, line_dash="solid", line_color="#EF4444")
+            
+            fig.update_yaxes(autorange="reversed", title="", gridcolor="#F1F5F9")
+            fig.update_xaxes(title="Kalendarz", gridcolor="#F1F5F9")
+            
+            fig.update_layout(
+                height=500,
+                margin=dict(l=0, r=0, t=20, b=0),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            fig.update_traces(marker_line_color='white', marker_line_width=1, opacity=0.85)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        else:
+            st.info("Brak danych do wyświetlenia dla wybranych filtrów.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-status_f = st.sidebar.multiselect(
-    "Status",
-    sorted(df["Status"].dropna().unique()),
-)
+    with tab_table:
+        st.dataframe(
+            filtered_df.sort_values("Data_Start"),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Data_Start": st.column_config.DateColumn("Początek", format="DD.MM.YYYY"),
+                "Data_Koniec": st.column_config.DateColumn("Koniec", format="DD.MM.YYYY"),
+                "Pojazd": "🚚 Pojazd",
+                "Projekt": "📁 Projekt",
+                "Status": st.column_config.SelectboxColumn("Status", options=["Zaplanowane", "W trasie", "Auto", "Zakończone"])
+            }
+        )
 
-data_od, data_do = st.sidebar.date_input(
-    "Zakres dat",
-    value=(df["Data_Start"].min().date(), df["Data_Koniec"].max().date()),
-)
+    with tab_alerts:
+        # Detekcja konfliktów (ten sam pojazd, nakładające się daty)
+        df_conf = filtered_df.sort_values(['Pojazd', 'Data_Start'])
+        conflict_rows = []
+        for i in range(len(df_conf)-1):
+            if df_conf.iloc[i]['Pojazd'] == df_conf.iloc[i+1]['Pojazd']:
+                if df_conf.iloc[i]['Data_Koniec'] > df_conf.iloc[i+1]['Data_Start']:
+                    conflict_rows.append(df_conf.iloc[i])
+                    conflict_rows.append(df_conf.iloc[i+1])
+        
+        if conflict_rows:
+            st.error("🚨 Wykryto kolizje w rezerwacji pojazdów!")
+            st.table(pd.DataFrame(conflict_rows).drop_duplicates())
+        else:
+            st.success("Brak konfliktów. Flota zaplanowana poprawnie.")
 
-# --------------------------------------------------
-# FILTER LOGIC
-# --------------------------------------------------
-filtered = df.copy()
-
-if pojazd_f:
-    filtered = filtered[filtered["Pojazd"].isin(pojazd_f)]
-if projekt_f:
-    filtered = filtered[filtered["Projekt"].isin(projekt_f)]
-if kierowca_f:
-    filtered = filtered[filtered["Kierowca"].isin(kierowca_f)]
-if status_f:
-    filtered = filtered[filtered["Status"].isin(status_f)]
-
-filtered = filtered[
-    (filtered["Data_Start"].dt.date >= data_od)
-    & (filtered["Data_Koniec"].dt.date <= data_do)
-]
-
-# --------------------------------------------------
-# MAIN – GANTT
-# --------------------------------------------------
-st.title("🚚 Flota SQM – Planowanie")
-
-fig = px.timeline(
-    filtered,
-    x_start="Data_Start",
-    x_end="Data_Koniec",
-    y="Pojazd",
-    color="Status",
-    color_discrete_map=STATUS_COLORS,
-    hover_data=["Projekt", "Kierowca", "Uwagi"],
-)
-
-fig.update_yaxes(autorange="reversed")
-fig.update_layout(
-    height=750,
-    legend_title_text="Status",
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# --------------------------------------------------
-# TABELA
-# --------------------------------------------------
-st.subheader("📋 Wpisy")
-
-selected = st.dataframe(
-    filtered[
-        [
-            "ID",
-            "Pojazd",
-            "Projekt",
-            "Kierowca",
-            "Status",
-            "Data_Start",
-            "Data_Koniec",
-            "Uwagi",
-        ]
-    ],
-    use_container_width=True,
-)
-
-# --------------------------------------------------
-# ADD / EDIT
-# --------------------------------------------------
-st.divider()
-st.subheader("➕ / ✏️ Dodaj lub edytuj wpis")
-
-edit_id = st.selectbox(
-    "Edytuj istniejący wpis (opcjonalnie)",
-    options=[None] + df["ID"].tolist(),
-)
-
-if edit_id is not None:
-    row = df[df["ID"] == edit_id].iloc[0]
-else:
-    row = {}
-
-with st.form("entry_form"):
-    c1, c2, c3 = st.columns(3)
-
-    pojazd = c1.text_input("Pojazd", row.get("Pojazd", ""))
-    projekt = c2.text_input("Projekt", row.get("Projekt", ""))
-    kierowca = c3.text_input("Kierowca",_
+except Exception as e:
+    st.error(f"Błąd krytyczny: {e}")
+    st.info("Upewnij się, że kolumny w arkuszu Google nazywają się: Pojazd, Projekt, Data_Start, Data_Koniec, Kierowca, Status, Uwagi")
