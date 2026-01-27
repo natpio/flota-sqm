@@ -5,9 +5,10 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # Konfiguracja strony
-st.set_page_config(page_title="SQM FLOTA", layout="wide")
+st.set_page_config(page_title="FLOTA SQM 2026", layout="wide")
 
-st.title("🚚 System Planowania Transportu SQM")
+st.title("🚚 FLOTA SQM 2026")
+st.markdown("---")
 
 # Połączenie z Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -18,113 +19,145 @@ def load_data():
 try:
     df = load_data()
 except Exception as e:
-    st.error("Błąd połączenia z arkuszem FLOTA_SQM.")
+    st.error("Błąd połączenia z arkuszem FLOTA_SQM. Sprawdź nazwę zakładki i uprawnienia.")
     st.stop()
 
-# --- PANEL BOCZNY ---
+# --- PANEL BOCZNY: FORMULARZ DODAWANIA ---
 with st.sidebar:
-    st.header("➕ Nowy Transport")
+    st.header("➕ Dodaj Transport")
     with st.form("add_form"):
-        # Pełna lista pojazdów z Twojego Excela dla wygody
-        pojazd = st.selectbox("Pojazd", [
-            "TIR 31 - P21V388/P22X300 STABLEWSKI", 
-            "TIR 2 - W2654FT/P22H972 KOGUS", 
+        # Grupowanie pojazdów zgodnie z Twoim Excelem
+        pojazd = st.selectbox("Wybierz Pojazd", [
+            "--- CIĘŻAROWE ---",
+            "31 - TIR P21V388/P22X300 STABLEWSKI",
+            "TIR 2 - W2654FT/P22H972 KOGUS",
             "TIR 3 - PNT3530A/P24U343 DANIELAK",
             "44 - SOLO PY 73262",
+            "45 - PY1541M + przyczepa",
+            "--- BUSY ---",
             "25 - Jumper - PY22952",
             "24 - Jumper - PY22954",
             "BOXER - PO 5VT68",
+            "BOXER - WZ211GF",
+            "BOXER - WZ214GF",
+            "--- OSOBOWE / INNE ---",
+            "OPEL DW4W443",
+            "OPEL wysoki DW4WK45",
             "SPEDYCJA"
         ])
-        projekt = st.text_input("Projekt (np. EuroShop)")
-        kierowca = st.text_input("Kierowca")
+        projekt = st.text_input("Nazwa Projektu / Targi")
+        kierowca = st.text_input("Kierowca / Spedytor")
         
         c1, c2 = st.columns(2)
-        d_start = c1.date_input("Start", value=datetime.now())
-        d_end = c2.date_input("Koniec", value=datetime.now() + timedelta(days=3))
+        d_start = c1.date_input("Data Wyjazdu", value=datetime.now())
+        d_end = c2.date_input("Data Powrotu", value=datetime.now() + timedelta(days=2))
         
-        submitted = st.form_submit_button("Dodaj do grafiku")
+        status = st.selectbox("Status", ["Planowanie", "Potwierdzone", "W trasie", "Serwis"])
+        
+        submitted = st.form_submit_button("ZAPISZ")
         
         if submitted:
-            new_row = pd.DataFrame([{
-                "Pojazd": pojazd,
-                "Projekt": projekt,
-                "Data_Start": d_start.strftime('%Y-%m-%d'),
-                "Data_Koniec": d_end.strftime('%Y-%m-%d'),
-                "Kierowca": kierowca,
-                "Status": "Zaplanowane"
-            }])
-            df = pd.concat([df, new_row], ignore_index=True)
-            conn.update(worksheet="FLOTA_SQM", data=df)
-            st.success("Zaktualizowano grafik!")
-            st.rerun()
+            if "---" in pojazd:
+                st.error("Wybierz konkretny pojazd, nie nazwę sekcji!")
+            else:
+                new_row = pd.DataFrame([{
+                    "Pojazd": pojazd,
+                    "Projekt": projekt,
+                    "Data_Start": d_start.strftime('%Y-%m-%d'),
+                    "Data_Koniec": d_end.strftime('%Y-%m-%d'),
+                    "Kierowca": kierowca,
+                    "Status": status
+                }])
+                df = pd.concat([df, new_row], ignore_index=True)
+                conn.update(worksheet="FLOTA_SQM", data=df)
+                st.success("Zapisano w bazie!")
+                st.rerun()
 
 # --- GŁÓWNY PANEL: HARMONOGRAM ---
-st.subheader("🗓️ Harmonogram floty (Widok dzienny)")
 
 if not df.empty:
+    # Przygotowanie danych do wykresu
     df['Data_Start'] = pd.to_datetime(df['Data_Start'])
-    # Dodajemy 1 dzień do daty końcowej, aby pasek na wykresie obejmował cały ostatni dzień
-    df['Data_Koniec_Viz'] = pd.to_datetime(df['Data_Koniec']) + pd.Timedelta(days=1)
+    # Viz_End musi być o 1 dzień większa, żeby pasek wypełnił cały dzień w kalendarzu
+    df['Viz_End'] = pd.to_datetime(df['Data_Koniec']) + pd.Timedelta(days=1)
 
-    # Tworzenie wykresu
+    st.subheader("🗓️ Widok Dzienny Floty")
+    
+    # Suwak zakresu dat dla lepszej nawigacji
+    col_date1, col_date2 = st.columns(2)
+    start_view = col_date1.date_input("Widok od:", datetime.now().date() - timedelta(days=7))
+    end_view = col_date2.date_input("Widok do:", datetime.now().date() + timedelta(days=30))
+
     fig = px.timeline(
         df, 
         x_start="Data_Start", 
-        x_end="Data_Koniec_Viz", 
+        x_end="Viz_End", 
         y="Pojazd", 
-        color="Projekt",
+        color="Status",
         text="Projekt",
-        hover_data={"Data_Koniec_Viz": False, "Data_Start": True, "Kierowca": True},
-        opacity=0.8
+        hover_data=["Kierowca", "Data_Start", "Data_Koniec"],
+        color_discrete_map={
+            "Planowanie": "#FAD02E",
+            "Potwierdzone": "#45B6FE",
+            "W trasie": "#37BC61",
+            "Serwis": "#E1341E"
+        },
+        category_orders={"Pojazd": [
+            "31 - TIR P21V388/P22X300 STABLEWSKI", "TIR 2 - W2654FT/P22H972 KOGUS", 
+            "TIR 3 - PNT3530A/P24U343 DANIELAK", "44 - SOLO PY 73262", "45 - PY1541M + przyczepa",
+            "25 - Jumper - PY22952", "24 - Jumper - PY22954", "BOXER - PO 5VT68", 
+            "BOXER - WZ211GF", "BOXER - WZ214GF", "OPEL DW4W443", "OPEL wysoki DW4WK45", "SPEDYCJA"
+        ]}
     )
 
-    # --- KLUCZOWE POPRAWKI CZYTELNOŚCI ---
-    
-    # 1. Wyraźna siatka co 1 dzień (jak w Excelu)
+    # Ustawienie osi czasu na dni
     fig.update_xaxes(
         dtick="D1", 
         tickformat="%d\n%b", 
         gridcolor="LightGrey", 
         showgrid=True,
-        side="top" # Daty na górze jak w Twoim Excelu
+        side="top",
+        range=[start_view, end_view]
     )
     
-    # 2. Linia "Dzisiaj" dla orientacji w trasach
-    fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=3, line_dash="dash", line_color="red")
+    fig.update_yaxes(autorange="reversed", gridcolor="WhiteSmoke")
     
-    # 3. Stała wysokość i sortowanie
-    fig.update_yaxes(autorange="reversed", gridcolor="whitesmoke")
+    # Pionowa linia "Dzisiaj"
+    fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=2, line_dash="solid", line_color="red")
+
     fig.update_layout(
-        height=600,
+        height=700,
         margin=dict(l=10, r=10, t=50, b=10),
         xaxis_title=None,
         yaxis_title=None,
-        showlegend=True,
-        clickmode='event+select'
+        legend_orientation="h",
+        legend_y=-0.1
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # --- EDYCJA DANYCH ---
+    # --- TABELA EDYCJI ---
     st.markdown("---")
-    st.subheader("📝 Lista transportów i edycja")
+    st.subheader("📋 Edycja Tabelaryczna")
     
-    # Formatujemy wyświetlanie dat w tabeli, żeby nie było godziny 00:00:00
-    df_display = df.copy()
-    df_display['Data_Start'] = df_display['Data_Start'].dt.date
-    df_display['Data_Koniec'] = pd.to_datetime(df_display['Data_Koniec']).dt.date
+    # Przygotowanie czytelnej tabeli bez godzin
+    df_table = df.drop(columns=['Viz_End'])
     
     edited_df = st.data_editor(
-        df_display.drop(columns=['Data_Koniec_Viz']), 
+        df_table, 
         num_rows="dynamic", 
-        use_container_width=True
+        use_container_width=True,
+        column_config={
+            "Data_Start": st.column_config.DateColumn("Start"),
+            "Data_Koniec": st.column_config.DateColumn("Koniec"),
+            "Status": st.column_config.SelectboxColumn("Status", options=["Planowanie", "Potwierdzone", "W trasie", "Serwis"])
+        }
     )
     
-    if st.button("💾 Zapisz zmiany w bazie"):
+    if st.button("💾 ZAPISZ ZMIANY W ARKUSZU"):
         conn.update(worksheet="FLOTA_SQM", data=edited_df)
-        st.success("Baza została zaktualizowana!")
+        st.success("Dane zostały zaktualizowane!")
         st.rerun()
 
 else:
-    st.info("Baza jest pusta. Dodaj pierwszy projekt w panelu bocznym.")
+    st.warning("Brak danych w arkuszu FLOTA_SQM. Dodaj pierwszy transport w panelu bocznym.")
