@@ -4,63 +4,64 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja i Styl "Friends"
+# 1. Konfiguracja i Stylistyka "Friends High-End"
 st.set_page_config(page_title="SQM | The One with the Logistics", layout="wide")
 
 st.markdown("""
     <style>
-    /* Import czcionki przypominającej styl czołówki */
-    @import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Inter:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Inter:wght@400;900&display=swap');
 
-    .stApp { background-color: #f4ece1; } /* Beż Central Perk */
+    /* Tło kawiarniane */
+    .stApp { 
+        background-color: #f4ece1; 
+        background-image: radial-gradient(#e5d5c0 1px, transparent 1px);
+        background-size: 20px 20px;
+    }
 
-    /* Nagłówek w stylu Friends */
-    .friends-logo {
-        font-family: 'Permanent+Marker', cursive;
-        font-size: 3rem;
+    /* Logo z kropkami */
+    .friends-header {
+        font-family: 'Permanent Marker', cursive;
+        font-size: 4rem;
         text-align: center;
-        color: #1e1e1e;
-        letter-spacing: 5px;
-        margin-bottom: 20px;
+        color: #262626;
+        padding: 20px;
+        text-shadow: 2px 2px #fff;
     }
-    .dot-red { color: #e02424; } .dot-blue { color: #2563eb; } .dot-yellow { color: #facc15; }
+    .dot-1 { color: #e02424; } .dot-2 { color: #2563eb; } .dot-3 { color: #facc15; }
 
-    /* Zakładki - Fiolet Moniki */
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #6b46c1; /* Fioletowe drzwi */
-        color: white;
-        border-radius: 20px;
-        padding: 10px 25px;
-        border: 2px solid #4c1d95;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #facc15 !important; /* Żółta ramka wizjera */
-        color: #1e1e1e !important;
-        font-weight: bold;
-    }
-
-    /* Kontener wykresu */
+    /* Żółta ramka Moniki dla wykresów */
     .stPlotlyChart {
-        background-color: #ffffff;
-        border: 5px solid #6b46c1;
-        border-radius: 15px;
-        padding: 10px;
+        border: 8px solid #facc15;
+        border-radius: 10px;
+        box-shadow: 10px 10px 0px #6b46c1;
+        background-color: white;
     }
 
-    /* Przycisk zapisu */
+    /* Tabs w kolorze fioletowym */
+    .stTabs [data-baseweb="tab-list"] { background-color: #6b46c1; padding: 10px; border-radius: 15px 15px 0 0; }
+    .stTabs [data-baseweb="tab"] { color: #f4ece1 !important; font-family: 'Inter', sans-serif; font-weight: 900; }
+    .stTabs [aria-selected="true"] { background-color: #facc15 !important; color: #6b46c1 !important; border-radius: 10px; }
+
+    /* Customowe Info Boxy */
+    .stAlert { background-color: #6b46c1; color: white; border: none; border-radius: 15px; }
+
+    /* Przycisk PIVOT! */
     .stButton>button {
+        width: 100%;
         background-color: #e02424;
         color: white;
-        border-radius: 50px;
         font-family: 'Permanent Marker', cursive;
-        border: none;
-        padding: 10px 30px;
+        font-size: 1.5rem;
+        border: 3px solid #000;
+        box-shadow: 5px 5px 0px #facc15;
+        transition: 0.2s;
     }
+    .stButton>button:hover { transform: translate(-2px, -2px); box-shadow: 7px 7px 0px #facc15; }
     </style>
     
-    <div class="friends-logo">
-        S<span class="dot-red">·</span>Q<span class="dot-blue">·</span>M<span class="dot-yellow">·</span> LOGISTICS
+    <div class="friends-header">
+        F<span class="dot-1">·</span>R<span class="dot-2">·</span>I<span class="dot-3">·</span>E<span class="dot-1">·</span>N<span class="dot-2">·</span>D<span class="dot-3">·</span>S
+        <div style="font-size: 1.5rem; margin-top: -15px; color: #6b46c1;">OF SQM LOGISTICS</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -88,7 +89,6 @@ RESOURCES = {
         "MIESZKANIE BCN - TORRASA", "MIESZKANIE BCN - ARGENTINA (PM)"
     ]
 }
-
 ALL_RESOURCES = [item for sublist in RESOURCES.values() for item in sublist]
 
 # 3. DANE
@@ -102,83 +102,77 @@ def get_data():
         data = data[expected].copy()
         data['start'] = pd.to_datetime(data['start'], errors='coerce')
         data['koniec'] = pd.to_datetime(data['koniec'], errors='coerce')
-        return data.fillna("")
+        return data.fillna(" ")
     except:
         return pd.DataFrame(columns=["pojazd", "event", "start", "koniec", "kierowca", "notatka"])
 
 df = get_data()
 
-# 4. DASHBOARD - "The One with the Fleet"
-tabs = st.tabs([f"🎬 {k}" for k in RESOURCES.keys()] + ["☕ CENTRAL PERK"])
+# 4. DASHBOARD - "The One where Joey Plans Transport"
+tabs = st.tabs([f"📺 {k}" for k in RESOURCES.keys()] + ["☕ CENTRAL PERK (EDIT)"])
 
-# Paleta kolorów "Friends" (Kultowa Kanapa, Ściany, Neon)
-friends_palette = ["#e02424", "#2563eb", "#facc15", "#6b46c1", "#059669", "#d97706"]
-unique_events = sorted(df['event'].unique())
-event_colors = {ev: friends_palette[i % len(friends_palette)] for i, ev in enumerate(unique_events)}
+# Kultowe kolory eventów (Koszula Joey'ego, Sukienka Rachel, Kanapa)
+friends_colors = ["#FF4136", "#0074D9", "#FFDC00", "#B10DC9", "#2ECC40", "#FF851B"]
+event_colors = {ev: friends_colors[i % len(friends_colors)] for i, ev in enumerate(sorted(df['event'].unique()))}
 
 for i, (category, items) in enumerate(RESOURCES.items()):
     with tabs[i]:
-        st.subheader(f"The One with {category}")
+        st.write(f"### 🎬 The One with {category}")
         cat_df = df[df['pojazd'].isin(items)].copy()
         
         if not cat_df.empty:
             fig = px.timeline(
                 cat_df, x_start="start", x_end="koniec", y="pojazd",
-                color="event", text="event",
-                color_discrete_map=event_colors,
-                category_orders={"pojazd": items},
-                template="plotly_white"
+                color="event", text="event", color_discrete_map=event_colors,
+                category_orders={"pojazd": items}, template="plotly_white"
             )
             
             today = datetime.now()
             fig.update_xaxes(
-                side="top", showgrid=True, gridcolor="#e2e8f0",
-                tickformat="%d\n%a", dtick=86400000.0,
-                tickfont=dict(size=10, family="Inter", color="#4b5563"),
-                range=[today - timedelta(days=2), today + timedelta(days=14)]
+                side="top", showgrid=True, gridcolor="#eee",
+                tickformat="%d %b\n%a", dtick=86400000.0,
+                range=[today - timedelta(days=2), today + timedelta(days=14)],
+                tickfont=dict(size=10, family="Inter", color="#6b46c1")
             )
             
-            # Weekendy - Kolor Kanapy Central Perk (lekko wyblakły)
+            # Weekendy - "Smelly Cat" Grey
             for d in range(366):
                 curr = datetime(2026, 1, 1) + timedelta(days=d)
                 if curr.weekday() >= 5:
                     fig.add_vrect(
                         x0=curr.strftime("%Y-%m-%d"), x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
-                        fillcolor="#d97706", opacity=0.1, layer="below", line_width=0
+                        fillcolor="#6b46c1", opacity=0.05, layer="below", line_width=0
                     )
 
-            fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter", color="#1f2937"))
+            fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter Black"))
             fig.update_traces(
-                textposition='inside', insidetextanchor='middle',
-                textfont=dict(size=12, family="Inter Black", color="white"),
-                marker=dict(line=dict(width=2, color='white'))
+                marker=dict(line=dict(width=2, color='white')),
+                textfont=dict(family="Inter", size=12, color="white")
             )
             
             fig.update_layout(
-                height=len(items) * 50 + 100,
-                margin=dict(l=10, r=10, t=60, b=0),
-                showlegend=False, bargap=0.3,
-                paper_bgcolor='white', plot_bgcolor='white'
+                height=len(items) * 50 + 120, margin=dict(l=10, r=10, t=80, b=10),
+                showlegend=False, bargap=0.4
             )
             
-            # Linia "PIVOT!" (Dziś)
+            # Linia Dziś - Czerwona jak usta Rachel
             fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#e02424")
             
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.info("How you doin'? Tu jeszcze nic nie ma.")
+            st.warning("How you doin'? No runs planned here yet!")
 
-# 5. ZAPIS - "The One where we save data"
+# 5. PANEL CENTRAL PERK (ZAPIS)
 with tabs[-1]:
-    st.subheader("☕ The One with the Editor")
+    st.write("### ☕ The One where Gunther Updates the Spreadsheet")
     edited_df = st.data_editor(
         df, num_rows="dynamic", use_container_width=True,
         column_config={"pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES)},
-        key="friends_v27"
+        key="friends_final_v1"
     )
     
-    if st.button("💾 SAVE THE EPISODE"):
-        with st.status("PIVOT! PIVOT! (Zapisywanie...)"):
+    if st.button("🚀 PIVOT! PIVOT! PIVOT!"):
+        with st.status("Smelly Cat is singing... (Saving)"):
             save_df = edited_df.copy()
             save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
