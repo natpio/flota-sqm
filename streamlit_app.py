@@ -7,12 +7,17 @@ from datetime import datetime, timedelta
 # 1. KONFIGURACJA STRONY
 st.set_page_config(page_title="FLOTA SQM 2026", layout="wide", page_icon="🚚")
 
-# Custom CSS dla ekstremalnej czytelności
+# Custom CSS dla maksymalnej widoczności dat i miesięcy
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
-    /* Stylizacja nagłówka osi X w Plotly */
-    .xtick text { font-size: 14px !important; font-weight: bold !important; fill: black !important; }
+    /* Stylizacja osi czasu (daty i miesiące) */
+    [data-testid="stPlotlyChart"] .xtick text { 
+        font-size: 18px !important; 
+        font-weight: 900 !important; 
+        fill: #000000 !important;
+        text-transform: uppercase;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -24,18 +29,28 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def load_data():
     df = conn.read(worksheet="FLOTA_SQM", ttl="0")
     df = df.dropna(how='all').copy()
+    
+    # Konwersja dat z zabezpieczeniem
     df['Data_Start'] = pd.to_datetime(df['Data_Start'], errors='coerce')
     df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'], errors='coerce')
-    # Upewnienie się, że mamy kolumnę LDM (ładunek)
+    
+    # ZABEZPIECZENIE LDM: Tworzymy kolumnę, jeśli nie istnieje w arkuszu
     if 'LDM' not in df.columns:
         df['LDM'] = ""
+    else:
+        df['LDM'] = df['LDM'].fillna("").astype(str)
+        
     return df.dropna(subset=['Data_Start', 'Data_Koniec'])
 
-df = load_data()
+try:
+    df = load_data()
+except Exception as e:
+    st.error(f"Problem z formatem danych w arkuszu: {e}")
+    st.stop()
 
-# 3. SIDEBAR - DODAWANIE TRANSPORTU
+# 3. SIDEBAR - FORMULARZ
 with st.sidebar:
-    st.header("⚙️ Nowy Transport")
+    st.header("⚙️ Dodaj Transport")
     with st.form("add_form", clear_on_submit=True):
         pojazd = st.selectbox("Pojazd", [
             "31 - TIR P21V388/P22X300 STABLEWSKI", "TIR 2 - W2654FT/P22H972 KOGUS",
@@ -45,7 +60,7 @@ with st.sidebar:
         ])
         projekt = st.text_input("Nazwa Projektu / Targi")
         kierowca = st.text_input("Kierowca")
-        ldm = st.text_input("Ładunek (np. 13.6 LDM, 24t)", help="Planowanie przestrzeni na naczepie")
+        ldm_input = st.text_input("Ładunek (LDM / tonaż)", placeholder="np. 13.6 LDM")
         
         c1, c2 = st.columns(2)
         d_start = c1.date_input("Wyjazd", value=datetime.now())
@@ -53,87 +68,89 @@ with st.sidebar:
         
         status = st.selectbox("Status", ["Planowanie", "Potwierdzone", "W trasie", "Serwis"])
         
-        if st.form_submit_button("ZAPISZ"):
+        if st.form_submit_button("ZAPISZ DO GRAFIKU"):
             new_row = pd.DataFrame([{
-                "Pojazd": pojazd, "Projekt": projekt, "Data_Start": d_start.strftime('%Y-%m-%d'),
-                "Data_Koniec": d_end.strftime('%Y-%m-%d'), "Kierowca": kierowca, "Status": status, "LDM": ldm
+                "Pojazd": pojazd, "Projekt": projekt, "Kierowca": kierowca,
+                "Data_Start": d_start.strftime('%Y-%m-%d'),
+                "Data_Koniec": d_end.strftime('%Y-%m-%d'),
+                "Status": status, "LDM": ldm_input
             }])
-            full_df = pd.concat([conn.read(worksheet="FLOTA_SQM", ttl="0"), new_row], ignore_index=True)
-            conn.update(worksheet="FLOTA_SQM", data=full_df)
+            # Pobranie aktualnego stanu, by nie nadpisać danych
+            current_data = conn.read(worksheet="FLOTA_SQM", ttl="0")
+            updated_data = pd.concat([current_data, new_row], ignore_index=True)
+            conn.update(worksheet="FLOTA_SQM", data=updated_data)
             st.rerun()
 
 # 4. GRAFIK GANTTA - POPRAWIONA WIDOCZNOŚĆ
-st.subheader("🗓️ Harmonogram Dzienny")
+st.subheader("🗓️ Harmonogram Logistyczny")
 
-today = datetime.now()
-df_viz = df.copy()
-df_viz['Viz_End'] = df_viz['Data_Koniec'] + pd.Timedelta(days=1)
+if not df.empty:
+    df_viz = df.copy()
+    df_viz['Viz_End'] = df_viz['Data_Koniec'] + pd.Timedelta(days=1)
 
-# Tworzenie wykresu
-fig = px.timeline(
-    df_viz, 
-    x_start="Data_Start", 
-    x_end="Viz_End", 
-    y="Pojazd", 
-    color="Status",
-    text="Projekt", # Projekt wyświetla się na pasku
-    hover_data=["Kierowca", "LDM"],
-    color_discrete_map={
-        "Planowanie": "#FAD02E", "Potwierdzone": "#45B6FE", 
-        "W trasie": "#37BC61", "Serwis": "#E1341E"
-    }
-)
+    fig = px.timeline(
+        df_viz, 
+        x_start="Data_Start", x_end="Viz_End", y="Pojazd", 
+        color="Status", text="Projekt",
+        hover_data={"Data_Start": "|%d %b", "Data_Koniec": "|%d %b", "Kierowca": True, "LDM": True, "Viz_End": False},
+        color_discrete_map={
+            "Planowanie": "#FAD02E", "Potwierdzone": "#45B6FE", 
+            "W trasie": "#37BC61", "Serwis": "#E1341E"
+        }
+    )
 
-# --- KLUCZOWE USTAWIENIA WIDOCZNOŚCI ---
-fig.update_xaxes(
-    dtick="D1",             # Pionowa linia dla każdego dnia
-    tickformat="%d\n%b",    # Dzień i Skrót Miesiąca (np. 27 Jan)
-    tickfont=dict(size=14, color="black", family="Arial Black"), # Duże, czarne napisy
-    gridcolor="LightGrey", 
-    showgrid=True,
-    side="top",             # Etykiety na górze (lepiej widoczne przy skrolowaniu)
-    title_text="KALENDARZ LOGISTYCZNY 2026"
-)
+    # USTAWIENIA OSI X - MAKSYMALNA WIDOCZNOŚĆ MIESIĘCY
+    fig.update_xaxes(
+        dtick="D1",             
+        tickformat="<b>%d</b><br><b>%b</b>", # %d to dzień, %b to miesiąc, <br> to nowa linia
+        tickfont=dict(size=16, color="black", family="Arial Black"),
+        gridcolor="#D3D3D3", 
+        showgrid=True,
+        side="top",
+        title_text=""
+    )
 
-fig.update_yaxes(
-    autorange="reversed", 
-    tickfont=dict(size=12, color="black", family="Arial"),
-    gridcolor="whitesmoke"
-)
+    fig.update_yaxes(autorange="reversed", tickfont=dict(size=12, color="black", weight="bold"))
+    
+    # Czerwona linia 'DZIŚ'
+    fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=4, line_color="red")
 
-# Czerwona linia 'DZIŚ'
-fig.add_vline(x=today.timestamp() * 1000, line_width=3, line_color="red")
+    fig.update_layout(
+        height=600,
+        margin=dict(l=10, r=10, t=110, b=10), # Duży margines górny na daty
+        plot_bgcolor="white",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5)
+    )
 
-fig.update_layout(
-    height=600,
-    margin=dict(l=10, r=10, t=80, b=10), # Większy margines na górze dla dat
-    plot_bgcolor="white",
-    showlegend=True,
-    legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5)
-)
+    st.plotly_chart(fig, use_container_width=True)
 
-st.plotly_chart(fig, use_container_width=True)
-
-# 5. TABELA EDYCJI Z LDM
+# 5. TABELA EDYCJI
 st.markdown("---")
-with st.expander("📝 Zarządzanie slotami i przestrzenią (LDM)", expanded=True):
+with st.expander("📝 Edycja danych, slotów i LDM", expanded=True):
     df_edit = df.copy()
     df_edit['Data_Start'] = df_edit['Data_Start'].dt.date
     df_edit['Data_Koniec'] = df_edit['Data_Koniec'].dt.date
+    if 'Viz_End' in df_edit.columns:
+        df_edit = df_edit.drop(columns=['Viz_End'])
+
+    # Dynamiczne tworzenie konfiguracji kolumn, aby uniknąć TypeError
+    col_config = {
+        "Data_Start": st.column_config.DateColumn("Wyjazd"),
+        "Data_Koniec": st.column_config.DateColumn("Powrót"),
+        "Status": st.column_config.SelectboxColumn("Status", options=["Planowanie", "Potwierdzone", "W trasie", "Serwis"]),
+    }
     
+    if "LDM" in df_edit.columns:
+        col_config["LDM"] = st.column_config.TextColumn("Ładunek / LDM")
+
     edited_df = st.data_editor(
         df_edit, 
         num_rows="dynamic", 
         use_container_width=True,
-        column_config={
-            "LDM": st.column_config.TextColumn("Ładunek / LDM", placeholder="np. 13.6 LDM"),
-            "Status": st.column_config.SelectboxColumn("Status", options=["Planowanie", "Potwierdzone", "W trasie", "Serwis"]),
-            "Data_Start": st.column_config.DateColumn("Wyjazd"),
-            "Data_Koniec": st.column_config.DateColumn("Powrót")
-        }
+        column_config=col_config
     )
     
-    if st.button("💾 AKTUALIZUJ ARKUSZ GOOGLE"):
+    if st.button("💾 ZAPISZ ZMIANY W BAZIE"):
         conn.update(worksheet="FLOTA_SQM", data=edited_df)
-        st.success("Dane zapisane!")
+        st.success("Zaktualizowano arkusz Google!")
         st.rerun()
