@@ -4,68 +4,74 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja i Stylistyka "Friends High-End"
-st.set_page_config(page_title="SQM | The One with the Logistics", layout="wide")
+# 1. Konfiguracja strony i Styl "Purple Door"
+st.set_page_config(page_title="SQM LOGISTICS | Control Tower", layout="wide")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Inter:wght@400;900&display=swap');
-
-    /* Tło kawiarniane */
+    /* Główne tło - Fiolet Moniki */
     .stApp { 
-        background-color: #f4ece1; 
-        background-image: radial-gradient(#e5d5c0 1px, transparent 1px);
-        background-size: 20px 20px;
+        background-color: #6b46c1; 
+        color: #ffffff;
     }
 
-    /* Logo z kropkami */
-    .friends-header {
-        font-family: 'Permanent Marker', cursive;
-        font-size: 4rem;
-        text-align: center;
-        color: #262626;
-        padding: 20px;
-        text-shadow: 2px 2px #fff;
+    /* Nagłówek */
+    h1 { 
+        color: #facc15; 
+        font-family: 'Inter', sans-serif; 
+        font-weight: 800;
+        text-shadow: 2px 2px 0px #1e1e1e;
     }
-    .dot-1 { color: #e02424; } .dot-2 { color: #2563eb; } .dot-3 { color: #facc15; }
 
-    /* Żółta ramka Moniki dla wykresów */
+    /* Stylizacja Zakładek */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        background-color: rgba(0,0,0,0.2);
+        padding: 10px;
+        border-radius: 12px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #ffffff;
+        border-radius: 8px;
+        color: #6b46c1;
+        font-weight: bold;
+        padding: 8px 20px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #facc15 !important;
+        color: #1e1e1e !important;
+    }
+
+    /* Kontener Wykresu z Żółtą Ramką */
     .stPlotlyChart {
-        border: 8px solid #facc15;
+        background-color: #ffffff;
+        border: 6px solid #facc15;
+        border-radius: 15px;
+        padding: 10px;
+        box-shadow: 10px 10px 20px rgba(0,0,0,0.3);
+    }
+
+    /* Sekcja Zarządzania (Data Editor) */
+    .stDataEditor {
+        background-color: #ffffff;
         border-radius: 10px;
-        box-shadow: 10px 10px 0px #6b46c1;
-        background-color: white;
+        padding: 5px;
     }
 
-    /* Tabs w kolorze fioletowym */
-    .stTabs [data-baseweb="tab-list"] { background-color: #6b46c1; padding: 10px; border-radius: 15px 15px 0 0; }
-    .stTabs [data-baseweb="tab"] { color: #f4ece1 !important; font-family: 'Inter', sans-serif; font-weight: 900; }
-    .stTabs [aria-selected="true"] { background-color: #facc15 !important; color: #6b46c1 !important; border-radius: 10px; }
-
-    /* Customowe Info Boxy */
-    .stAlert { background-color: #6b46c1; color: white; border: none; border-radius: 15px; }
-
-    /* Przycisk PIVOT! */
+    /* Przycisk zapisu */
     .stButton>button {
+        background-color: #facc15;
+        color: #1e1e1e;
+        border: none;
+        font-weight: bold;
+        border-radius: 8px;
+        padding: 10px 25px;
         width: 100%;
-        background-color: #e02424;
-        color: white;
-        font-family: 'Permanent Marker', cursive;
-        font-size: 1.5rem;
-        border: 3px solid #000;
-        box-shadow: 5px 5px 0px #facc15;
-        transition: 0.2s;
     }
-    .stButton>button:hover { transform: translate(-2px, -2px); box-shadow: 7px 7px 0px #facc15; }
     </style>
-    
-    <div class="friends-header">
-        F<span class="dot-1">·</span>R<span class="dot-2">·</span>I<span class="dot-3">·</span>E<span class="dot-1">·</span>N<span class="dot-2">·</span>D<span class="dot-3">·</span>S
-        <div style="font-size: 1.5rem; margin-top: -15px; color: #6b46c1;">OF SQM LOGISTICS</div>
-    </div>
     """, unsafe_allow_html=True)
 
-# 2. DEFINICJA ZASOBÓW
+# 2. DEFINICJA ZASOBÓW (Oryginalna)
 RESOURCES = {
     "🚛 FTL / SOLO": [
         "31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS",
@@ -108,71 +114,78 @@ def get_data():
 
 df = get_data()
 
-# 4. DASHBOARD - "The One where Joey Plans Transport"
-tabs = st.tabs([f"📺 {k}" for k in RESOURCES.keys()] + ["☕ CENTRAL PERK (EDIT)"])
+# 4. INTERFEJS
+st.title("🛰️ SQM LOGISTICS CONTROL TOWER")
 
-# Kultowe kolory eventów (Koszula Joey'ego, Sukienka Rachel, Kanapa)
-friends_colors = ["#FF4136", "#0074D9", "#FFDC00", "#B10DC9", "#2ECC40", "#FF851B"]
-event_colors = {ev: friends_colors[i % len(friends_colors)] for i, ev in enumerate(sorted(df['event'].unique()))}
+tabs = st.tabs(list(RESOURCES.keys()) + ["⚙️ ZARZĄDZANIE"])
 
-for i, (category, items) in enumerate(RESOURCES.items()):
+# Kolory eventów (Wyraźne na białym tle)
+log_colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"]
+unique_events = sorted(df['event'].unique())
+event_colors = {ev: log_colors[i % len(log_colors)] for i, ev in enumerate(unique_events)}
+
+for i, category in enumerate(RESOURCES.keys()):
     with tabs[i]:
-        st.write(f"### 🎬 The One with {category}")
-        cat_df = df[df['pojazd'].isin(items)].copy()
+        cat_df = df[df['pojazd'].isin(RESOURCES[category])].copy()
         
         if not cat_df.empty:
             fig = px.timeline(
                 cat_df, x_start="start", x_end="koniec", y="pojazd",
-                color="event", text="event", color_discrete_map=event_colors,
-                category_orders={"pojazd": items}, template="plotly_white"
+                color="event", text="event",
+                color_discrete_map=event_colors,
+                category_orders={"pojazd": RESOURCES[category]},
+                template="plotly_white"
             )
             
             today = datetime.now()
             fig.update_xaxes(
-                side="top", showgrid=True, gridcolor="#eee",
-                tickformat="%d %b\n%a", dtick=86400000.0,
+                side="top", showgrid=True, gridcolor="#f1f5f9",
+                tickformat="%d\n%a", dtick=86400000.0,
+                tickfont=dict(size=10, family="Inter", color="#64748b"),
                 range=[today - timedelta(days=2), today + timedelta(days=14)],
-                tickfont=dict(size=10, family="Inter", color="#6b46c1")
+                rangeslider=dict(visible=True, thickness=0.02)
             )
             
-            # Weekendy - "Smelly Cat" Grey
+            # Weekendy
             for d in range(366):
                 curr = datetime(2026, 1, 1) + timedelta(days=d)
                 if curr.weekday() >= 5:
                     fig.add_vrect(
                         x0=curr.strftime("%Y-%m-%d"), x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
-                        fillcolor="#6b46c1", opacity=0.05, layer="below", line_width=0
+                        fillcolor="#f8fafc", opacity=1, layer="below", line_width=0
                     )
 
             fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter Black"))
             fig.update_traces(
-                marker=dict(line=dict(width=2, color='white')),
-                textfont=dict(family="Inter", size=12, color="white")
+                textposition='inside', insidetextanchor='middle',
+                textfont=dict(size=11, color="white"),
+                marker=dict(line=dict(width=1, color='white'))
             )
-            
             fig.update_layout(
-                height=len(items) * 50 + 120, margin=dict(l=10, r=10, t=80, b=10),
-                showlegend=False, bargap=0.4
+                height=len(RESOURCES[category]) * 45 + 120,
+                margin=dict(l=10, r=10, t=70, b=0),
+                showlegend=False, bargap=0.3
             )
-            
-            # Linia Dziś - Czerwona jak usta Rachel
-            fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#e02424")
-            
+            fig.add_vline(x=today.timestamp()*1000, line_width=2, line_color="#ef4444")
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.warning("How you doin'? No runs planned here yet!")
+            st.info(f"Brak zaplanowanych zadań dla: {category}")
 
-# 5. PANEL CENTRAL PERK (ZAPIS)
+# 5. ZARZĄDZANIE
 with tabs[-1]:
-    st.write("### ☕ The One where Gunther Updates the Spreadsheet")
+    st.subheader("🛠️ Panel Edycji Danych")
     edited_df = st.data_editor(
         df, num_rows="dynamic", use_container_width=True,
-        column_config={"pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES)},
-        key="friends_final_v1"
+        column_config={
+            "pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES),
+            "start": st.column_config.DateColumn("Początek"),
+            "koniec": st.column_config.DateColumn("Koniec")
+        },
+        key="sqm_v28_purple"
     )
     
-    if st.button("🚀 PIVOT! PIVOT! PIVOT!"):
-        with st.status("Smelly Cat is singing... (Saving)"):
+    if st.button("💾 ZAPISZ I SYNCHRONIZUJ"):
+        with st.status("Trwa aktualizacja bazy..."):
             save_df = edited_df.copy()
             save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
