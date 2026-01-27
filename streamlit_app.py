@@ -4,89 +4,109 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja strony i Naprawa Interfejsu (v2.9.3)
-st.set_page_config(page_title="SQM FLOTA | Control Tower", layout="wide")
+# 1. Konfiguracja i Stylistyka "Tablicy Kredowej"
+st.set_page_config(page_title="SQM FLOTA | Chalkboard", layout="wide")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Inter:wght@400;900&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Gochi+Hand&family=Inter:wght@400;900&display=swap');
 
-    /* TŁO: Głęboki fiolet drzwi Moniki #744DA9 */
+    /* TŁO: Czarna tablica barowa */
     .stApp { 
-        background-color: #744DA9; 
+        background-color: #1a1a1a;
+        background-image: url("https://www.transparenttextures.com/patterns/black-chalkboard.png");
     }
 
-    /* Logo S·Q·M·FLOTA */
-    .friends-title {
+    /* Nagłówek SQM FLOTA jako napis kredą */
+    .chalk-title {
         font-family: 'Permanent Marker', cursive;
-        font-size: 4.5rem;
+        font-size: 5rem;
         text-align: center;
-        color: white;
-        text-shadow: 4px 4px 0px #1e1e1e;
+        color: #ffffff;
+        text-shadow: 2px 2px 10px rgba(255,255,255,0.4), -1px -1px 0 #444;
         margin-bottom: 0px;
-        padding-top: 10px;
     }
-    .dot-r { color: #e02424; } .dot-b { color: #2563eb; } .dot-y { color: #facc15; }
+    .chalk-dot { color: #facc15; opacity: 0.8; }
 
-    /* Stylizacja Zakładek: Neon Central Perk */
+    /* Stylizacja Zakładek - kolorowa kreda */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 15px;
-        background-color: rgba(0,0,0,0.3);
-        padding: 15px;
-        border-radius: 20px;
+        gap: 10px;
+        background-color: transparent;
+        padding: 10px;
     }
     .stTabs [data-baseweb="tab"] {
-        background-color: #ffffff;
-        border-radius: 50px;
-        color: #744DA9 !important;
-        font-weight: 900;
-        border: 3px solid transparent;
+        background-color: rgba(255,255,255,0.05);
+        border: 2px dashed rgba(255,255,255,0.3) !important;
+        color: #eee !important;
+        font-family: 'Gochi Hand', cursive;
+        font-size: 1.5rem;
+        border-radius: 5px;
         padding: 5px 20px;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #facc15 !important;
-        color: #1e1e1e !important;
-        box-shadow: 0 0 20px #facc15;
+        background-color: rgba(255,255,255,0.1) !important;
+        border: 2px solid #facc15 !important;
+        color: #facc15 !important;
+        transform: rotate(-1deg);
     }
 
-    /* Stylizacja Wykresów - Żółta Ramka */
+    /* Wykres w ramce rysowanej kredą */
     .stPlotlyChart {
-        background-color: #ffffff;
-        border: 8px solid #facc15 !important;
-        border-radius: 20px !important;
-        padding: 10px;
-        box-shadow: 10px 10px 0px rgba(0,0,0,0.4);
+        background-color: rgba(0,0,0,0.4) !important;
+        border: 3px solid #eee !important;
+        border-radius: 5px !important;
+        box-shadow: 0 0 15px rgba(255,255,255,0.1);
+        padding: 5px;
     }
 
-    /* Specjalny kontener na edytor - oddech od tła */
-    .editor-container {
-        background-color: white;
-        padding: 20px;
-        border-radius: 15px;
-        border: 5px solid #facc15;
-        margin-top: 20px;
+    /* EDYTOR - NAPRAWA SUWAKA I STYLU */
+    [data-testid="stDataEditor"] {
+        border: 2px solid #facc15 !important;
+        background-color: #222 !important;
+        border-radius: 10px;
+    }
+    
+    /* Wymuszenie widoczności paska przewijania w Chrome/Safari/Edge */
+    ::-webkit-scrollbar {
+        width: 12px;
+        height: 12px;
+    }
+    ::-webkit-scrollbar-track {
+        background: #1a1a1a;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: #444;
+        border-radius: 6px;
+        border: 2px solid #1a1a1a;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: #facc15;
     }
 
-    /* Przycisk PIVOT! */
+    /* Przycisk PIVOT! - Czerwona kreda */
     .stButton>button {
-        background-color: #e02424;
-        color: white;
+        background-color: transparent;
+        color: #ff4b4b;
         font-family: 'Permanent Marker', cursive;
-        font-size: 2.2rem;
-        height: 80px;
-        border-radius: 15px;
-        border: 4px solid #ffffff;
-        box-shadow: 6px 6px 0px #1e1e1e;
+        font-size: 2.5rem;
+        border: 4px double #ff4b4b;
+        border-radius: 0px;
+        transition: 0.3s;
         width: 100%;
-        margin-top: 20px;
+        margin-top: 30px;
+    }
+    .stButton>button:hover {
+        color: white;
+        background-color: #ff4b4b;
+        box-shadow: 0 0 20px #ff4b4b;
     }
     </style>
 
-    <div class="friends-title">
-        S<span class="dot-r">·</span>Q<span class="dot-b">·</span>M<span class="dot-y">·</span>FLOTA
+    <div class="chalk-title">
+        S<span class="chalk-dot">·</span>Q<span class="chalk-dot">·</span>M<span class="chalk-dot">·</span>FLOTA
     </div>
-    <div style="text-align: center; color: white; font-family: 'Inter'; font-weight: 900; margin-bottom: 20px; letter-spacing: 2px;">
-        THE ONE WITH THE LOGISTICS SLOTS
+    <div style="text-align: center; color: #aaa; font-family: 'Gochi Hand'; font-size: 1.5rem; margin-bottom: 20px;">
+        The One with the Blackboard Menu
     </div>
     """, unsafe_allow_html=True)
 
@@ -133,11 +153,12 @@ def get_data():
 
 df = get_data()
 
-# 4. GŁÓWNY PANEL
-tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 ZARZĄDZANIE"])
+# 4. DASHBOARD - Wykresy jako rysunki kredą
+tabs = st.tabs(list(RESOURCES.keys()) + ["🖍️ EDYCJA"])
 
-friends_palette = ["#e02424", "#2563eb", "#facc15", "#744DA9", "#059669", "#FF851B"]
-event_colors = {ev: friends_palette[i % len(friends_palette)] for i, ev in enumerate(sorted(df['event'].unique()))}
+# Kolory "kredowe"
+chalk_palette = ["#FF7F7F", "#7FBFFF", "#FFFF7F", "#BF7FFF", "#7FFF7F", "#FFBF7F"]
+event_colors = {ev: chalk_palette[i % len(chalk_palette)] for i, ev in enumerate(sorted(df['event'].unique()))}
 
 for i, category in enumerate(RESOURCES.keys()):
     with tabs[i]:
@@ -146,45 +167,49 @@ for i, category in enumerate(RESOURCES.keys()):
             fig = px.timeline(
                 cat_df, x_start="start", x_end="koniec", y="pojazd",
                 color="event", text="event", color_discrete_map=event_colors,
-                category_orders={"pojazd": RESOURCES[category]}, template="plotly_white"
+                category_orders={"pojazd": RESOURCES[category]}, template="plotly_dark"
             )
             today = datetime.now()
             fig.update_xaxes(
-                side="top", showgrid=True, gridcolor="#eee",
+                side="top", showgrid=True, gridcolor="rgba(255,255,255,0.1)",
                 tickformat="%d\n%a", dtick=86400000.0,
-                tickfont=dict(size=11, family="Inter Black", color="#744DA9"),
+                tickfont=dict(size=11, family="Gochi Hand", color="#eee"),
                 range=[today - timedelta(days=2), today + timedelta(days=14)]
             )
-            fig.update_yaxes(title="", tickfont=dict(size=11, family="Inter Black"))
-            fig.update_traces(textposition='inside', insidetextanchor='middle')
-            fig.update_layout(height=len(RESOURCES[category]) * 55 + 150, margin=dict(l=10, r=10, t=80, b=10), showlegend=False)
-            fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#e02424")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("How you doin'? Brak danych.")
+            fig.update_yaxes(title="", tickfont=dict(size=12, family="Gochi Hand", color="#eee"))
+            fig.update_traces(marker=dict(line=dict(width=1, color='rgba(255,255,255,0.5)')))
+            fig.update_layout(
+                height=len(RESOURCES[category]) * 55 + 150,
+                margin=dict(l=10, r=10, t=80, b=10),
+                showlegend=False,
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)'
+            )
+            # Linia "Today" jako biała kreda
+            fig.add_vline(x=today.timestamp()*1000, line_width=3, line_color="white", line_dash="dash")
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-# 5. ZARZĄDZANIE - Wersja z wymuszonym suwakiem
+# 5. ZARZĄDZANIE - Naprawiony suwak w ciemnym edytorze
 with tabs[-1]:
-    st.markdown('<div class="editor-container">', unsafe_allow_html=True)
-    st.subheader("📝 Edycja Bazy Floty")
+    st.markdown('<div style="background-color: rgba(255,255,255,0.05); padding: 20px; border-radius: 10px;">', unsafe_allow_html=True)
+    st.subheader("🖍️ Napisz kredą zmiany w planie")
     
-    # Parametr 'height' wymusza suwak boczny, a 'use_container_width' suwak poziomy
     edited_df = st.data_editor(
         df, 
         num_rows="dynamic", 
         use_container_width=True,
-        height=500,  # SZTYWNA WYSOKOŚĆ = GWARANTOWANY SUWAK
+        height=500, # Wymusza suwak boczny
         column_config={
             "pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_RESOURCES),
             "start": st.column_config.DateColumn("Start"),
             "koniec": st.column_config.DateColumn("Koniec")
         },
-        key="super_scroll_editor_v3"
+        key="chalkboard_editor"
     )
     st.markdown('</div>', unsafe_allow_html=True)
     
-    if st.button("PIVOT! PIVOT! PIVOT!"):
-        with st.status("Saving..."):
+    if st.button("PIVOT! (ZAPISZ NA TABLICY)"):
+        with st.spinner("Ścieranie starej kredy..."):
             save_df = edited_df.copy()
             save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
