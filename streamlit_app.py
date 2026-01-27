@@ -4,104 +4,130 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. KONFIGURACJA STRONY
+# 1. KONFIGURACJA STRONY - MUSI BYĆ NA POCZĄTKU
 st.set_page_config(
-    page_title="SQM Logistics Intelligence",
-    page_icon="📊",
+    page_title="SQM Dashboard",
+    page_icon="🚛",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 2. CUSTOM CSS - Profesjonalny look
+# 2. ZAAWANSOWANY CSS DLA EFEKTU DASHBOARDU
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    [data-testid="stMetricValue"] { font-size: 28px; font-weight: 700; color: #1E3A8A; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 5px 5px 0px 0px; gap: 1px; }
-    .stTabs [aria-selected="true"] { background-color: #1E3A8A !important; color: white !important; }
+    /* Stylizacja tła i głównego kontenera */
+    .stApp { background-color: #F4F7F9; }
+    
+    /* Panel boczny - Ciemny motyw */
+    [data-testid="stSidebar"] {
+        background-color: #1E293B !important;
+        color: white !important;
+    }
+    [data-testid="stSidebar"] * { color: white !important; }
+    
+    /* Karty metryk (KPIs) */
+    div[data-testid="metric-container"] {
+        background-color: white;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border: 1px solid #E2E8F0;
+    }
+    
+    /* Stylowanie zakładek (Tabs) */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: transparent;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: white;
+        border-radius: 8px 8px 0 0;
+        padding: 10px 20px;
+        border: 1px solid #E2E8F0;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #2563EB !important;
+        color: white !important;
+        border-color: #2563EB !important;
+    }
+
+    /* Nagłówek sekcji */
+    .section-header {
+        font-size: 20px;
+        font-weight: 700;
+        color: #1E293B;
+        margin-bottom: 20px;
+        margin-top: 10px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. POŁĄCZENIE I DANE
+# 3. POŁĄCZENIE Z DANYMI
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def get_data():
-    # Pobieramy dane z arkusza FLOTA_SQM
-    df = conn.read(ttl="5s")
-    # Usuwamy puste wiersze na podstawie kluczowych kolumn
+def load_clean_data():
+    df = conn.read(ttl="2s")
     df = df.dropna(subset=['Pojazd', 'Data_Start', 'Data_Koniec'])
-    # Konwersja na datetime
     df['Data_Start'] = pd.to_datetime(df['Data_Start'])
     df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'])
     return df
 
 try:
-    df = get_data()
+    df = load_clean_data()
 
-    # --- PANEL BOCZNY ---
+    # --- PANEL BOCZNY (SIDEBAR) ---
     with st.sidebar:
-        st.image("https://sqm.pl/wp-content/uploads/2018/10/logo_sqm_header.png", width=180)
-        st.markdown("### 🛠️ Parametry widoku")
+        st.markdown("<h2 style='text-align: center;'>SQM LOGISTICS</h2>", unsafe_allow_html=True)
+        st.divider()
+        st.markdown("### 📋 PANEL STEROWANIA")
         
-        # POPRAWKA BŁĘDU: Użycie timedelta zamiast + int
-        min_date = df['Data_Start'].min().date()
-        max_date = (df['Data_Koniec'].max() + timedelta(days=14)).date()
+        # Filtry w panelu bocznym
+        search = st.text_input("🔍 Szukaj projektu/auta")
         
-        date_range = st.date_input(
-            "Zakres filtrowania",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date + timedelta(days=365)
+        status_filter = st.multiselect(
+            "Filtruj status:",
+            options=df['Status'].unique(),
+            default=df['Status'].unique()
         )
         
-        search_query = st.text_input("🔍 Szukaj (Projekt / Kierowca / Pojazd)")
-        
         st.divider()
-        st.info("System monitoruje kolizje w czasie rzeczywistym.")
-
-    # --- HEADER ---
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        st.title("Centrum Operacyjne Floty")
-        st.markdown(f"**Aktualizacja:** {datetime.now().strftime('%H:%M:%S')}")
-    with c2:
-        if st.button("🔄 Przeładuj dane", use_container_width=True):
+        if st.button("🔄 Odśwież system", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
+            
+        st.markdown("<br><br><br>", unsafe_allow_html=True)
+        st.caption("SQM Fleet Management v3.0")
 
-    # --- FILTROWANIE ---
-    # Logika wyszukiwarki
-    mask = (
-        df['Projekt'].astype(str).str.contains(search_query, case=False) | 
-        df['Kierowca'].astype(str).str.contains(search_query, case=False) |
-        df['Pojazd'].astype(str).str.contains(search_query, case=False)
-    )
-    
-    # Logika zakresu dat (sprawdzenie czy wybrano obie daty)
-    if len(date_range) == 2:
-        mask = mask & (df['Data_Start'].dt.date >= date_range[0]) & (df['Data_Koniec'].dt.date <= date_range[1])
-    
-    filtered_df = df[mask]
+    # --- NAGŁÓWEK GŁÓWNY ---
+    st.markdown("<div class='section-header'>Pulpit Logistics Dashboard</div>", unsafe_allow_html=True)
+    st.caption(f"Ostatnia synchronizacja: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
 
-    # --- METRYKI ---
+    # --- METRYKI (KPI CARDS) ---
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Łączna flota", df['Pojazd'].nunique())
-    m2.metric("Projekty w toku", df['Projekt'].nunique())
     
     today = pd.Timestamp.now().normalize()
-    active_now = df[(df['Data_Start'] <= today) & (df['Data_Koniec'] >= today)].shape[0]
-    m3.metric("W trasie (dziś)", active_now)
+    active_today = df[(df['Data_Start'] <= today) & (df['Data_Koniec'] >= today)].shape[0]
+    upcoming = df[df['Data_Start'] > today].shape[0]
     
-    # Sprawdzanie konfliktów (ten sam pojazd, nakładające się daty)
-    conflicts = filtered_df[filtered_df.duplicated(subset=['Pojazd'], keep=False)]
-    m4.metric("Alerty kolizji", "0" if conflicts.empty else len(conflicts), delta_color="inverse")
+    with m1: st.metric("Łączna flota", df['Pojazd'].nunique())
+    with m2: st.metric("Aktywne projekty", df['Projekt'].nunique())
+    with m3: st.metric("Pojazdy w trasie", active_today)
+    with m4: st.metric("Zaplanowane (7d)", upcoming)
 
-    # --- WIDOK GŁÓWNY ---
-    tab_gantt, tab_list, tab_conflicts = st.tabs(["📅 Harmonogram Gantt", "📑 Tabela Operacyjna", "⚠️ Konflikty"])
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    with tab_gantt:
+    # --- FILTROWANIE DANYCH ---
+    filtered_df = df[
+        (df['Projekt'].str.contains(search, case=False) | df['Pojazd'].str.contains(search, case=False)) &
+        (df['Status'].isin(status_filter))
+    ]
+
+    # --- GŁÓWNA SEKCJA Z TABAMI ---
+    t1, t2, t3 = st.tabs(["📊 Harmonogram Gantt", "📑 Tabela Operacyjna", "⚠️ Konflikty"])
+
+    with t1:
+        st.markdown("<div style='background-color: white; padding: 20px; border-radius: 12px; border: 1px solid #E2E8F0;'>", unsafe_allow_html=True)
         if not filtered_df.empty:
             fig = px.timeline(
                 filtered_df,
@@ -111,57 +137,56 @@ try:
                 color="Projekt",
                 text="Projekt",
                 hover_data=["Kierowca", "Status"],
-                color_discrete_sequence=px.colors.qualitative.Prism
+                template="plotly_white",
+                color_discrete_sequence=px.colors.qualitative.Bold
             )
             
-            # Linia aktualnego czasu
-            fig.add_vline(x=datetime.now(), line_width=2, line_dash="dash", line_color="#FF4B4B")
+            # Linia "TERAZ"
+            fig.add_vline(x=datetime.now(), line_width=3, line_dash="solid", line_color="#EF4444", 
+                         annotation_text="TERAZ", annotation_position="top left")
             
-            fig.update_yaxes(autorange="reversed", gridcolor="#f0f0f0")
-            fig.update_xaxes(gridcolor="#f0f0f0", title="Oś czasu")
+            fig.update_yaxes(autorange="reversed", title="", gridcolor="#F1F5F9")
+            fig.update_xaxes(title="Oś czasu (dni)", gridcolor="#F1F5F9")
             
             fig.update_layout(
-                height=600,
-                margin=dict(l=10, r=10, t=10, b=10),
-                plot_bgcolor="white",
-                showlegend=True,
+                height=500,
+                margin=dict(l=0, r=0, t=20, b=0),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             
             fig.update_traces(marker_line_color='white', marker_line_width=2, opacity=0.9)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.warning("Brak danych dla wybranych filtrów.")
+            st.warning("Brak danych do wyświetlenia.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    with tab_list:
+    with t2:
         st.dataframe(
-            filtered_df.sort_values(by="Data_Start"),
-            column_config={
-                "Data_Start": st.column_config.DateColumn("Start", format="DD.MM.YYYY"),
-                "Data_Koniec": st.column_config.DateColumn("Koniec", format="DD.MM.YYYY"),
-                "Status": st.column_config.SelectboxColumn("Status", options=["Zaplanowane", "W trasie", "Auto", "Zakończone"]),
-                "Uwagi": st.column_config.TextColumn("Komentarz", width="large")
-            },
+            filtered_df.sort_values("Data_Start"),
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
+            column_config={
+                "Data_Start": st.column_config.DateColumn("Data Start"),
+                "Data_Koniec": st.column_config.DateColumn("Data Koniec"),
+                "Pojazd": st.column_config.TextColumn("🚚 Pojazd"),
+                "Status": st.column_config.SelectboxColumn("Status", options=["Zaplanowane", "W trasie", "Auto", "Zakończone"])
+            }
         )
 
-    with tab_conflicts:
-        # Bardziej zaawansowana logika konfliktów
-        df_sorted = filtered_df.sort_values(['Pojazd', 'Data_Start'])
-        conflict_list = []
-        for i in range(len(df_sorted)-1):
-            if df_sorted.iloc[i]['Pojazd'] == df_sorted.iloc[i+1]['Pojazd']:
-                if df_sorted.iloc[i]['Data_Koniec'] > df_sorted.iloc[i+1]['Data_Start']:
-                    conflict_list.append(df_sorted.iloc[i])
-                    conflict_list.append(df_sorted.iloc[i+1])
+    with t3:
+        # Logika konfliktów
+        df_conf = filtered_df.sort_values(['Pojazd', 'Data_Start'])
+        conflicts = []
+        for i in range(len(df_conf)-1):
+            if df_conf.iloc[i]['Pojazd'] == df_conf.iloc[i+1]['Pojazd']:
+                if df_conf.iloc[i]['Data_Koniec'] > df_conf.iloc[i+1]['Data_Start']:
+                    conflicts.append(df_conf.iloc[i:i+2])
         
-        if conflict_list:
-            st.error("Wykryto nakładające się terminy dla tych samych jednostek!")
-            st.table(pd.DataFrame(conflict_list).drop_duplicates())
+        if conflicts:
+            st.error("🚨 Wykryto kolizje w rezerwacji pojazdów!")
+            st.table(pd.concat(conflicts).drop_duplicates())
         else:
-            st.success("Brak konfliktów czasowych w wybranym zakresie.")
+            st.success("Wszystkie zasoby są poprawnie zaplanowane.")
 
 except Exception as e:
-    st.error(f"Wystąpił błąd podczas przetwarzania danych: {e}")
-    st.info("Upewnij się, że kolumny w arkuszu nazywają się dokładnie: Pojazd, Projekt, Data_Start, Data_Koniec, Kierowca, Status, Uwagi")
+    st.error(f"Błąd krytyczny: {e}")
