@@ -36,12 +36,22 @@ st.markdown("""
         margin: 10px 0;
         border-radius: 4px;
         color: #2b2d42;
+        font-family: 'Segoe UI', sans-serif;
     }
     
     /* Poprawa czytelności osi X w Plotly */
     [data-testid="stPlotlyChart"] .xtick text { 
         font-family: 'Arial Black', sans-serif !important;
         font-size: 11px !important;
+    }
+    
+    /* Stylizacja przycisków */
+    .stButton>button {
+        width: 100%;
+        border-radius: 5px;
+        height: 3em;
+        background-color: #1D3557;
+        color: white;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -104,24 +114,23 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_db_data():
     """Pobiera dane i wymusza poprawne formaty"""
-    df = conn.read(worksheet="FLOTA_SQM", ttl="0")
-    if df.empty: return pd.DataFrame()
-    df = df.dropna(subset=['Pojazd', 'Data_Start', 'Data_Koniec']).copy()
-    df['Data_Start'] = pd.to_datetime(df['Data_Start'], errors='coerce')
-    df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'], errors='coerce')
-    df = df.dropna(subset=['Data_Start', 'Data_Koniec'])
-    return df
+    try:
+        df = conn.read(worksheet="FLOTA_SQM", ttl="0")
+        if df.empty: return pd.DataFrame()
+        df = df.dropna(subset=['Pojazd', 'Data_Start', 'Data_Koniec']).copy()
+        df['Data_Start'] = pd.to_datetime(df['Data_Start'], errors='coerce')
+        df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'], errors='coerce')
+        df = df.dropna(subset=['Data_Start', 'Data_Koniec'])
+        return df
+    except Exception as e:
+        st.error(f"Błąd połączenia: {e}")
+        return pd.DataFrame()
 
 def check_overlapping(df, vehicle, start, end):
     """Logika Double Booking: sprawdza czy auto jest zajęte w danym terminie"""
-    # Konwersja dat wejściowych do porównania
     start_dt = pd.to_datetime(start)
     end_dt = pd.to_datetime(end)
-    
-    # Filtrujemy tylko wpisy dla wybranego auta
     car_df = df[df['Pojazd'] == vehicle]
-    
-    # Warunek nachodzenia: (StartA <= EndB) AND (EndA >= StartB)
     conflicts = car_df[
         (car_df['Data_Start'] <= end_dt) & 
         (car_df['Data_Koniec'] >= start_dt)
@@ -156,11 +165,11 @@ with st.sidebar:
                 conflict_exists = True
                 st.error(f"❌ AUTO ZAJĘTE! Projekt: {conflicts.iloc[0]['Projekt']}")
         
-        submitted = st.form_submit_button("ZAPISZ W HARMONOGRAMIE", use_container_width=True)
+        submitted = st.form_submit_button("ZAPISZ W HARMONOGRAMIE")
         
         if submitted:
             if conflict_exists:
-                st.warning("Nie można zapisać - popraw daty transportu!")
+                st.warning("Nie można zapisać - występuje kolizja dat!")
             elif not p_name:
                 st.error("Podaj nazwę projektu!")
             else:
@@ -184,16 +193,17 @@ st.title("🚚 GRAFIK OPERACYJNY FLOTY SQM")
 # Weryfikacja błędów w bazie (stare wpisy nakładające się)
 st.subheader("⚠️ Alerty Logistyczne")
 found_any_conflict = False
-for car in df_main['Pojazd'].unique():
-    subset = df_main[df_main['Pojazd'] == car].sort_values('Data_Start')
-    for i in range(len(subset)-1):
-        if subset.iloc[i]['Data_Koniec'] >= subset.iloc[i+1]['Data_Start']:
-            st.markdown(f"""<div class="conflict-card">
-                <b>KONFLIKT DAT:</b> {car}<br>
-                {subset.iloc[i]['Projekt']} ({subset.iloc[i]['Data_Start'].strftime('%d.%m')}) 
-                <-> {subset.iloc[i+1]['Projekt']} ({subset.iloc[i+1]['Data_Start'].strftime('%d.%m')})
-                </div>""", unsafe_allow_html=True)
-            found_any_conflict = True
+if not df_main.empty:
+    for car in df_main['Pojazd'].unique():
+        subset = df_main[df_main['Pojazd'] == car].sort_values('Data_Start')
+        for i in range(len(subset)-1):
+            if subset.iloc[i]['Data_Koniec'] >= subset.iloc[i+1]['Data_Start']:
+                st.markdown(f"""<div class="conflict-card">
+                    <b>KONFLIKT DAT:</b> {car}<br>
+                    {subset.iloc[i]['Projekt']} ({subset.iloc[i]['Data_Start'].strftime('%d.%m')}) 
+                    <-> {subset.iloc[i+1]['Projekt']} ({subset.iloc[i+1]['Data_Start'].strftime('%d.%m')})
+                    </div>""", unsafe_allow_html=True)
+                found_any_conflict = True
 
 if not found_any_conflict:
     st.info("Brak konfliktów w grafiku. Wszystkie auta zaplanowane poprawnie.")
@@ -201,7 +211,7 @@ if not found_any_conflict:
 # Suwak zakresu
 all_days = [d.date() for d in pd.date_range(start="2026-01-01", end="2026-12-31", freq='D')]
 view_range = st.select_slider(
-    "Przesuń, aby zmienić zakres widoku grafiku:",
+    "Zakres widoku grafiku:",
     options=all_days,
     value=(datetime.now().date() - timedelta(days=2), datetime.now().date() + timedelta(days=21))
 )
@@ -266,7 +276,6 @@ with st.expander("Otwórz panel zarządzania wierszami"):
         edited = st.data_editor(df_edit, num_rows="dynamic", use_container_width=True)
         if st.button("💾 ZAPISZ ZMIANY W GOOGLE SHEETS"):
             conn.update(worksheet="FLOTA_SQM", data=edited)
-            st.success("Zsynchronizowano z arkuszem!")
             st.rerun()
     else:
         st.info("Baza danych jest pusta.")
