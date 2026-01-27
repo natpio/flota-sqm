@@ -40,9 +40,19 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def get_data():
     try:
         data = conn.read(ttl="0s")
+        # Standaryzacja nazw do małych liter dla kodu
         data.columns = [c.strip().lower() for c in data.columns]
+        
+        # Zapewnienie, że mamy dokładnie te kolumny, których oczekujemy
+        expected = ["pojazd", "event", "start", "koniec", "kierowca", "notatka"]
+        for col in expected:
+            if col not in data.columns:
+                data[col] = ""
+        
+        data = data[expected] # Zachowaj tylko te 6 kolumn
         data['start'] = pd.to_datetime(data['start'], errors='coerce')
         data['koniec'] = pd.to_datetime(data['koniec'], errors='coerce')
+        
         for col in ['pojazd', 'event', 'kierowca', 'notatka']:
             data[col] = data[col].astype(str).replace(['nan', 'None', ''], ' ')
         return data
@@ -55,90 +65,92 @@ st.title("🛰️ SQM Logistics Control Center")
 
 tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 ZARZĄDZANIE"])
 
-# Stałe kolory dla eventów
+# Stałe kolory
 all_events = sorted(df['event'].unique())
 color_palette = px.colors.qualitative.Prism
 event_colors = {event: color_palette[i % len(color_palette)] for i, event in enumerate(all_events)}
 
 for i, category in enumerate(RESOURCES.keys()):
     with tabs[i]:
-        cat_df = df[df['pojazd'].isin(RESOURCES[category])]
+        cat_df = df[df['pojazd'].isin(RESOURCES[category])].copy()
         
-        fig = px.timeline(
-            cat_df, x_start="start", x_end="koniec", y="pojazd",
-            color="event", text="event",
-            color_discrete_map=event_colors,
-            category_orders={"pojazd": RESOURCES[category]},
-            template="plotly_white"
-        )
-        
-        # --- STABILNA KONFIGURACJA OSI X ---
-        today = datetime.now()
-        fig.update_xaxes(
-            side="top",
-            showgrid=True,
-            gridcolor="#E5E5E5",
-            # Uproszczony format: Dzień, skrót dnia i miesiąc w jednej linii dla stabilności
-            tickformat="%d %b\n%a",
-            dtick=86400000.0, # Co 1 dzień
-            tickfont=dict(size=10, family="Arial Black", color="black"),
-            range=[today - timedelta(days=3), today + timedelta(days=18)],
-            rangeslider=dict(visible=True, thickness=0.03)
-        )
-        
-        # --- PODŚWIETLENIE WEEKENDÓW ---
-        # Bezpieczne generowanie tła weekendów (sobota-niedziela)
-        start_cal = datetime(2026, 1, 1)
-        for d in range(365):
-            curr = start_cal + timedelta(days=d)
-            if curr.weekday() >= 5:
-                fig.add_vrect(
-                    x0=curr.strftime("%Y-%m-%d"), 
-                    x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
-                    fillcolor="#F5F5F5", 
-                    opacity=1.0, 
-                    layer="below", 
-                    line_width=0
-                )
+        if not cat_df.empty:
+            fig = px.timeline(
+                cat_df, x_start="start", x_end="koniec", y="pojazd",
+                color="event", text="event",
+                color_discrete_map=event_colors,
+                category_orders={"pojazd": RESOURCES[category]},
+                template="plotly_white"
+            )
+            
+            today = datetime.now()
+            fig.update_xaxes(
+                side="top", showgrid=True, gridcolor="#E5E5E5",
+                tickformat="%d %b\n%a", dtick=86400000.0,
+                tickfont=dict(size=10, family="Arial Black"),
+                range=[today - timedelta(days=3), today + timedelta(days=18)],
+                rangeslider=dict(visible=True, thickness=0.03)
+            )
+            
+            # Weekendy
+            start_cal = datetime(2026, 1, 1)
+            for d in range(365):
+                curr = start_cal + timedelta(days=d)
+                if curr.weekday() >= 5:
+                    fig.add_vrect(
+                        x0=curr.strftime("%Y-%m-%d"), x1=(curr + timedelta(days=1)).strftime("%Y-%m-%d"),
+                        fillcolor="#F5F5F5", opacity=1.0, layer="below", line_width=0
+                    )
 
-        fig.update_yaxes(title="", tickfont=dict(size=11))
-        fig.update_traces(
-            textposition='inside',
-            insidetextanchor='middle',
-            textfont=dict(size=12, family="Arial Black"),
-            marker=dict(line=dict(width=1, color='white'))
-        )
-        
-        fig.update_layout(
-            height=len(RESOURCES[category]) * 40 + 150,
-            margin=dict(l=10, r=10, t=80, b=10),
-            showlegend=False,
-            bargap=0.35
-        )
-        
-        # Linia "DZISIAJ"
-        fig.add_vline(x=today.timestamp()*1000, line_width=2, line_dash="dash", line_color="red")
-        
-        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            fig.update_yaxes(title="", tickfont=dict(size=11))
+            fig.update_traces(
+                textposition='inside', insidetextanchor='middle',
+                textfont=dict(size=12, family="Arial Black"),
+                marker=dict(line=dict(width=1, color='white'))
+            )
+            fig.update_layout(
+                height=len(RESOURCES[category]) * 42 + 150,
+                margin=dict(l=10, r=10, t=80, b=10), showlegend=False, bargap=0.35
+            )
+            fig.add_vline(x=today.timestamp()*1000, line_width=2, line_dash="dash", line_color="red")
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+        else:
+            st.info(f"Brak danych dla sekcji {category}")
 
-# 5. PANEL EDYCJI
+# 5. PANEL EDYCJI (Naprawa błędu ValueError)
 with tabs[-1]:
     st.subheader("📝 Edycja Bazy danych")
+    
+    # Edytujemy kopię głównego DF, który ma dokładnie 6 kolumn
     edited_df = st.data_editor(
-        df, num_rows="dynamic", use_container_width=True,
+        df, 
+        num_rows="dynamic", 
+        use_container_width=True,
         column_config={
             "pojazd": st.column_config.SelectboxColumn("Zasób SQM", options=ALL_RESOURCES, width="large"),
             "start": st.column_config.DateColumn("Start"),
             "koniec": st.column_config.DateColumn("Koniec")
         },
-        key="editor_final_v1"
+        key="editor_v2.3"
     )
     
     if st.button("💾 ZAPISZ ZMIANY"):
-        save_df = edited_df.copy()
-        save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-        save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
-        save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
-        conn.update(data=save_df)
-        st.success("Dane zapisane w Google Sheets!")
-        st.rerun()
+        try:
+            # Tworzymy kopię do zapisu
+            save_df = edited_df.copy()
+            
+            # Upewniamy się, że nie ma żadnych dodatkowych kolumn (np. indeksów)
+            save_df = save_df[["pojazd", "event", "start", "koniec", "kierowca", "notatka"]]
+            
+            # Przywracamy oryginalne nazwy kolumn z Arkusza Google (Wielkie litery)
+            save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+            
+            # Konwersja dat na tekst
+            save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
+            save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
+            
+            conn.update(data=save_df)
+            st.success("Zapisano pomyślnie w Google Sheets!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Błąd podczas zapisu: {e}")
