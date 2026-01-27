@@ -2,8 +2,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # 1. KONFIGURACJA STRONY
 st.set_page_config(
@@ -13,39 +12,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. CUSTOM CSS - Profesjonalny look & feel
+# 2. CUSTOM CSS - Profesjonalny look
 st.markdown("""
     <style>
-    /* Główny tło i czcionka */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-    }
-    
-    /* Stylizacja metryk */
-    [data-testid="stMetricValue"] {
-        font-size: 24px;
-        font-weight: 700;
-        color: #1E3A8A;
-    }
-    
-    /* Stylizacja bocznego menu */
-    .css-1d391kg {
-        background-color: #f8f9fa;
-    }
-    
-    /* Kontener dla wykresów */
-    .plot-container {
-        border-radius: 15px;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
-        padding: 10px;
-        background: white;
-    }
-
-    /* Customowe kolory statusów */
-    .status-zaplanowane { color: #3b82f6; font-weight: bold; }
-    .status-w-trasie { color: #f59e0b; font-weight: bold; }
-    .status-zakonczone { color: #10b981; font-weight: bold; }
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    [data-testid="stMetricValue"] { font-size: 28px; font-weight: 700; color: #1E3A8A; }
+    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 5px 5px 0px 0px; gap: 1px; }
+    .stTabs [aria-selected="true"] { background-color: #1E3A8A !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -53,8 +28,11 @@ st.markdown("""
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
+    # Pobieramy dane z arkusza FLOTA_SQM
     df = conn.read(ttl="5s")
+    # Usuwamy puste wiersze na podstawie kluczowych kolumn
     df = df.dropna(subset=['Pojazd', 'Data_Start', 'Data_Koniec'])
+    # Konwersja na datetime
     df['Data_Start'] = pd.to_datetime(df['Data_Start'])
     df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'])
     return df
@@ -62,112 +40,128 @@ def get_data():
 try:
     df = get_data()
 
-    # --- SIDEBAR ---
+    # --- PANEL BOCZNY ---
     with st.sidebar:
         st.image("https://sqm.pl/wp-content/uploads/2018/10/logo_sqm_header.png", width=180)
-        st.markdown("### Konfiguracja Widoku")
+        st.markdown("### 🛠️ Parametry widoku")
+        
+        # POPRAWKA BŁĘDU: Użycie timedelta zamiast + int
+        min_date = df['Data_Start'].min().date()
+        max_date = (df['Data_Koniec'].max() + timedelta(days=14)).date()
         
         date_range = st.date_input(
-            "Zakres raportowania",
-            value=(df['Data_Start'].min(), df['Data_Start'].max() + pd.Timedelta(days=7))
+            "Zakres filtrowania",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date + timedelta(days=365)
         )
         
-        search_query = st.text_input("🔍 Szukaj projektu lub kierowcy")
+        search_query = st.text_input("🔍 Szukaj (Projekt / Kierowca / Pojazd)")
         
         st.divider()
-        st.caption("SQM Fleet Management v2.0")
-        st.caption("System operacyjny logistyki")
+        st.info("System monitoruje kolizje w czasie rzeczywistym.")
 
     # --- HEADER ---
     c1, c2 = st.columns([3, 1])
     with c1:
         st.title("Centrum Operacyjne Floty")
-        st.markdown(f"_Ostatnia aktualizacja danych: {datetime.now().strftime('%H:%M:%S')}_")
+        st.markdown(f"**Aktualizacja:** {datetime.now().strftime('%H:%M:%S')}")
     with c2:
-        if st.button("🔄 Odśwież system", use_container_width=True):
+        if st.button("🔄 Przeładuj dane", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
-    # --- METRYKI KLUCZOWE ---
+    # --- FILTROWANIE ---
+    # Logika wyszukiwarki
+    mask = (
+        df['Projekt'].astype(str).str.contains(search_query, case=False) | 
+        df['Kierowca'].astype(str).str.contains(search_query, case=False) |
+        df['Pojazd'].astype(str).str.contains(search_query, case=False)
+    )
+    
+    # Logika zakresu dat (sprawdzenie czy wybrano obie daty)
+    if len(date_range) == 2:
+        mask = mask & (df['Data_Start'].dt.date >= date_range[0]) & (df['Data_Koniec'].dt.date <= date_range[1])
+    
+    filtered_df = df[mask]
+
+    # --- METRYKI ---
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Łączna flota", df['Pojazd'].nunique())
-    m2.metric("Aktywne projekty", df['Projekt'].nunique())
+    m2.metric("Projekty w toku", df['Projekt'].nunique())
     
-    # Wyliczanie pojazdów w trasie na dziś
     today = pd.Timestamp.now().normalize()
     active_now = df[(df['Data_Start'] <= today) & (df['Data_Koniec'] >= today)].shape[0]
-    m3.metric("Pojazdy w trasie (dziś)", active_now)
+    m3.metric("W trasie (dziś)", active_now)
     
-    m4.metric("Zaplanowane (7d)", df[df['Data_Start'] > today].shape[0])
+    # Sprawdzanie konfliktów (ten sam pojazd, nakładające się daty)
+    conflicts = filtered_df[filtered_df.duplicated(subset=['Pojazd'], keep=False)]
+    m4.metric("Alerty kolizji", "0" if conflicts.empty else len(conflicts), delta_color="inverse")
 
-    # --- TABS: WIZUALIZACJA I DANE ---
-    tab_gantt, tab_table, tab_stats = st.tabs(["📊 Harmonogram Wizualny", "📋 Lista Operacyjna", "📈 Analityka"])
+    # --- WIDOK GŁÓWNY ---
+    tab_gantt, tab_list, tab_conflicts = st.tabs(["📅 Harmonogram Gantt", "📑 Tabela Operacyjna", "⚠️ Konflikty"])
 
     with tab_gantt:
-        # Filtrowanie danych na podstawie wyszukiwania
-        mask = df['Projekt'].str.contains(search_query, case=False) | df['Kierowca'].str.contains(search_query, case=False)
-        plot_df = df[mask]
-
-        if not plot_df.empty:
+        if not filtered_df.empty:
             fig = px.timeline(
-                plot_df,
+                filtered_df,
                 x_start="Data_Start",
                 x_end="Data_Koniec",
                 y="Pojazd",
                 color="Projekt",
                 text="Projekt",
-                hover_data={"Kierowca": True, "Status": True, "Data_Start": "|%d %b", "Data_Koniec": "|%d %b"},
-                color_discrete_sequence=px.colors.qualitative.Bold
+                hover_data=["Kierowca", "Status"],
+                color_discrete_sequence=px.colors.qualitative.Prism
             )
-
-            # Dodanie linii "Dzisiaj"
-            fig.add_vline(x=datetime.now(), line_width=2, line_dash="dash", line_color="red", 
-                         annotation_text="TERAZ", annotation_position="top left")
-
-            fig.update_yaxes(autorange="reversed", gridcolor="#eeeeee")
-            fig.update_xaxes(gridcolor="#eeeeee")
+            
+            # Linia aktualnego czasu
+            fig.add_vline(x=datetime.now(), line_width=2, line_dash="dash", line_color="#FF4B4B")
+            
+            fig.update_yaxes(autorange="reversed", gridcolor="#f0f0f0")
+            fig.update_xaxes(gridcolor="#f0f0f0", title="Oś czasu")
             
             fig.update_layout(
-                height=550,
-                margin=dict(l=10, r=10, t=30, b=10),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                plot_bgcolor="white"
+                height=600,
+                margin=dict(l=10, r=10, t=10, b=10),
+                plot_bgcolor="white",
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             
-            fig.update_traces(marker_line_color='rgb(8,48,107)', marker_line_width=1.5, opacity=0.85)
-
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+            fig.update_traces(marker_line_color='white', marker_line_width=2, opacity=0.9)
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("Brak wyników dla podanych kryteriów.")
+            st.warning("Brak danych dla wybranych filtrów.")
 
-    with tab_table:
-        st.subheader("Szczegóły logistyczne")
-        # Wykorzystanie AgGrid-like st.dataframe
+    with tab_list:
         st.dataframe(
-            df,
+            filtered_df.sort_values(by="Data_Start"),
             column_config={
-                "Status": st.column_config.SelectboxColumn(
-                    "Status",
-                    options=["Zaplanowane", "W trasie", "Zakończone", "Auto"],
-                    required=True,
-                ),
-                "Data_Start": st.column_config.DateColumn("Start", format="DD/MM/YYYY"),
-                "Data_Koniec": st.column_config.DateColumn("Koniec", format="DD/MM/YYYY"),
-                "Pojazd": st.column_config.TextColumn("🚚 Pojazd"),
-                "Projekt": st.column_config.TextColumn("📁 Projekt"),
+                "Data_Start": st.column_config.DateColumn("Start", format="DD.MM.YYYY"),
+                "Data_Koniec": st.column_config.DateColumn("Koniec", format="DD.MM.YYYY"),
+                "Status": st.column_config.SelectboxColumn("Status", options=["Zaplanowane", "W trasie", "Auto", "Zakończone"]),
+                "Uwagi": st.column_config.TextColumn("Komentarz", width="large")
             },
-            hide_index=True,
-            use_container_width=True
+            use_container_width=True,
+            hide_index=True
         )
 
-    with tab_stats:
-        st.subheader("Wykorzystanie Floty")
-        usage = df['Pojazd'].value_counts().reset_index()
-        usage.columns = ['Pojazd', 'Liczba Projektów']
-        fig_bar = px.bar(usage, x='Pojazd', y='Liczba Projektów', color='Liczba Projektów', 
-                         color_continuous_scale='Blues', template='plotly_white')
-        st.plotly_chart(fig_bar, use_container_width=True)
+    with tab_conflicts:
+        # Bardziej zaawansowana logika konfliktów
+        df_sorted = filtered_df.sort_values(['Pojazd', 'Data_Start'])
+        conflict_list = []
+        for i in range(len(df_sorted)-1):
+            if df_sorted.iloc[i]['Pojazd'] == df_sorted.iloc[i+1]['Pojazd']:
+                if df_sorted.iloc[i]['Data_Koniec'] > df_sorted.iloc[i+1]['Data_Start']:
+                    conflict_list.append(df_sorted.iloc[i])
+                    conflict_list.append(df_sorted.iloc[i+1])
+        
+        if conflict_list:
+            st.error("Wykryto nakładające się terminy dla tych samych jednostek!")
+            st.table(pd.DataFrame(conflict_list).drop_duplicates())
+        else:
+            st.success("Brak konfliktów czasowych w wybranym zakresie.")
 
 except Exception as e:
-    st.error(f"Krytyczny błąd systemu: {e}")
-    st.info("Sprawdź połączenie z Google Cloud Console i uprawnienia arkusza.")
+    st.error(f"Wystąpił błąd podczas przetwarzania danych: {e}")
+    st.info("Upewnij się, że kolumny w arkuszu nazywają się dokładnie: Pojazd, Projekt, Data_Start, Data_Koniec, Kierowca, Status, Uwagi")
