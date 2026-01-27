@@ -7,11 +7,23 @@ from datetime import datetime, timedelta
 # 1. KONFIGURACJA STRONY
 st.set_page_config(page_title="FLOTA SQM 2026", layout="wide", page_icon="🚚")
 
-# Słownik polskich miesięcy
+# Słownik polskich miesięcy i dni
 PL_MONTHS = {
     1: "STYCZEŃ", 2: "LUTY", 3: "MARZEC", 4: "KWIECIEŃ", 
     5: "MAJ", 6: "CZERWIEC", 7: "LIPIEC", 8: "SIERPIEŃ", 
     9: "WRZESIEŃ", 10: "PAŹDZIERNIK", 11: "LISTOPAD", 12: "GRUDZIEŃ"
+}
+PL_WEEKDAYS = ["Pn", "Wt", "Śr", "Cz", "Pt", "Sb", "Nd"]
+
+# Lista świąt ustawowych w Polsce 2026
+POLISH_HOLIDAYS = {
+    "2026-01-01": "Nowy Rok", "2026-01-06": "Trzech Króli",
+    "2026-04-05": "Wielkanoc", "2026-04-06": "Poniedziałek Wielkanocny",
+    "2026-05-01": "Święto Pracy", "2026-05-03": "Święto Konstytucji",
+    "2026-05-24": "Zesłanie Ducha Św.", "2026-06-04": "Boże Ciało",
+    "2026-08-15": "Wniebowzięcie / Wojska Polskiego", "2026-11-01": "Wszystkich Świętych",
+    "2026-11-11": "Święto Niepodległości", "2026-12-25": "Boże Narodzenie",
+    "2026-12-26": "Drugi Dzień Świąt"
 }
 
 st.markdown("""
@@ -19,7 +31,7 @@ st.markdown("""
     .stApp { background-color: #f8f9fa; }
     [data-testid="stPlotlyChart"] .xtick text { 
         font-family: 'Arial Black', sans-serif !important;
-        font-size: 13px !important;
+        font-size: 11px !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -46,11 +58,7 @@ def load_data():
     df['Status'] = df.apply(lambda x: get_auto_status(x['Data_Start'], x['Data_Koniec']), axis=1)
     return df
 
-try:
-    df = load_data()
-except Exception as e:
-    st.error("Błąd ładowania danych. Sprawdź strukturę arkusza.")
-    st.stop()
+df = load_data()
 
 # 3. SIDEBAR
 with st.sidebar:
@@ -75,27 +83,23 @@ with st.sidebar:
             conn.update(worksheet="FLOTA_SQM", data=pd.concat([current, new_row], ignore_index=True))
             st.rerun()
 
-# 4. FILTR ZAKRESU DAT (SUWAK) - NAPRAWIONY
+# 4. FILTR ZAKRESU DAT (SUWAK)
 st.subheader("🗓️ Harmonogram Operacyjny")
 
-# Tworzymy listę opcji jako obiekty date (nie Timestamp i nie datetime)
 slider_options = [d.date() for d in pd.date_range(start="2026-01-01", end="2026-12-31", freq='D')]
-
-# Ustalenie wartości domyślnych (muszą być typu date i znajdować się w slider_options)
 default_start = datetime.now().date() - timedelta(days=2)
-default_end = datetime.now().date() + timedelta(days=30)
+default_end = datetime.now().date() + timedelta(days=21)
 
 col_slider, _ = st.columns([0.6, 0.4])
 with col_slider:
     selected_range = st.select_slider(
-        "Przesuń paski, aby zmienić zakres podglądu miesięcy:",
+        "Przesuń, aby zmienić zakres podglądu:",
         options=slider_options,
         value=(default_start, default_end)
     )
     start_view, end_view = selected_range
 
 if not df.empty:
-    # Konwersja start_view/end_view na datetime dla Plotly
     start_dt = pd.to_datetime(start_view)
     end_dt = pd.to_datetime(end_view)
     
@@ -105,24 +109,45 @@ if not df.empty:
     fig = px.timeline(
         df_viz, x_start="Data_Start", x_end="Viz_End", y="Pojazd", 
         color="Projekt", text="Projekt",
-        hover_data={"Data_Start": "|%d.%m", "Data_Koniec": "|%d.%m", "Status": True, "Projekt": False, "Viz_End": False}
+        hover_data={"Data_Start": "|%d.%m (%a)", "Data_Koniec": "|%d.%m (%a)", "Status": True, "Projekt": False, "Viz_End": False}
     )
 
-    # --- GENEROWANIE DYNAMICZNEJ POLSKIEJ OSI X ---
-    # Wyświetlamy etykiety tylko dla wybranego zakresu
+    # --- GENEROWANIE ZAAWANSOWANEJ OSI X ---
     current_range = pd.date_range(start=start_view, end=end_view)
-    
     tick_vals = []
     tick_text = []
     last_month = -1
 
     for d in current_range:
         tick_vals.append(d)
+        wd = PL_WEEKDAYS[d.weekday()]
+        date_str = d.strftime('%Y-%m-%d')
+        
+        # Kolor i styl dla weekendów i świąt
+        is_holiday = date_str in POLISH_HOLIDAYS
+        is_weekend = d.weekday() >= 5 # 5=Sb, 6=Nd
+        
+        color = "black"
+        if is_holiday: color = "#D62828" # Czerwony dla świąt
+        elif is_weekend: color = "#666666" # Szary dla weekendu
+        
+        # Budowa etykiety (Dzień + Nazwa dnia)
+        label = f"<b>{d.day}</b><br>{wd}"
+        
+        # Dodanie nazwy miesiąca na początku
         if d.month != last_month:
-            tick_text.append(f"<b>{d.day}</b><br><span style='color:#E63946'>{PL_MONTHS[d.month]}</span>")
+            label = f"<span style='color:#1D3557'><b>{PL_MONTHS[d.month]}</b></span><br>" + label
             last_month = d.month
-        else:
-            tick_text.append(f"<b>{d.day}</b>")
+            
+        tick_text.append(f"<span style='color:{color}'>{label}</span>")
+
+        # Zaznaczenie weekendów i świąt w tle wykresu (vrect)
+        if is_holiday or is_weekend:
+            fig.add_vrect(
+                x0=d, x1=d + timedelta(days=1),
+                fillcolor="rgba(200, 200, 200, 0.2)" if is_weekend else "rgba(255, 0, 0, 0.1)",
+                layer="below", line_width=0,
+            )
 
     fig.update_xaxes(
         tickmode='array',
@@ -136,11 +161,11 @@ if not df.empty:
     fig.update_yaxes(autorange="reversed", gridcolor="#F5F5F5", title="")
     
     # Pionowa linia DZISIAJ
-    fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=3, line_color="red")
+    fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=3, line_color="#E63946", line_dash="dash")
 
     fig.update_layout(
         height=600,
-        margin=dict(l=10, r=10, t=100, b=10),
+        margin=dict(l=10, r=10, t=110, b=10),
         showlegend=False,
         plot_bgcolor="white"
     )
