@@ -2,7 +2,6 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 # ==========================================
@@ -14,6 +13,7 @@ st.set_page_config(
     page_icon="🚚"
 )
 
+# Stylizacja Excel-like
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; }
@@ -55,7 +55,7 @@ PL_MONTHS = {1: "STYCZEŃ", 2: "LUTY", 3: "MARZEC", 4: "KWIECIEŃ", 5: "MAJ", 6:
 PL_WEEKDAYS = ["pon.", "wt.", "śr.", "czw.", "pt.", "sob.", "niedz."]
 
 # ==========================================
-# 3. POBIERANIE DANYCH (Z FIXEM KEYERROR)
+# 3. POBIERANIE DANYCH
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -65,11 +65,11 @@ def get_data_safe():
         if df is None or df.empty:
             return pd.DataFrame(columns=["Pojazd", "Projekt", "Kierowca", "Data_Start", "Data_Koniec", "Kolor_Projektu"])
         
-        # Zabezpieczenie przed brakiem kolumn
+        # Standaryzacja kolumn
         required_columns = ["Pojazd", "Projekt", "Kierowca", "Data_Start", "Data_Koniec", "Kolor_Projektu"]
         for col in required_columns:
             if col not in df.columns:
-                df[col] = "#3b82f6" if col == "Kolor_Projektu" else ""
+                df[col] = "#facc15" if col == "Kolor_Projektu" else ""
         
         df['Data_Start'] = pd.to_datetime(df['Data_Start'], errors='coerce')
         df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'], errors='coerce')
@@ -81,7 +81,7 @@ def get_data_safe():
 df_main = get_data_safe()
 
 # ==========================================
-# 4. SIDEBAR
+# 4. SIDEBAR - DODAWANIE
 # ==========================================
 with st.sidebar:
     st.header("➕ NOWY TRANSPORT")
@@ -91,7 +91,8 @@ with st.sidebar:
         f_k = st.text_input("Kierowca")
         f_s = st.date_input("Start")
         f_e = st.date_input("Koniec", value=datetime.now() + timedelta(days=3))
-        f_c = st.color_picker("Kolor paska", "#facc15") # Domyślnie żółty jak w Excelu
+        # Selektor koloru obsługiwany przez standardowy widget (zawsze działa)
+        f_c = st.color_picker("Kolor paska (Projektu)", "#facc15") 
         
         if st.form_submit_button("DODAJ DO HARMONOGRAMU"):
             new_row = pd.DataFrame([{
@@ -100,29 +101,26 @@ with st.sidebar:
                 "Data_Koniec": f_e.strftime('%Y-%m-%d'),
                 "Kolor_Projektu": f_c
             }])
-            # Pobierz aktualne, doklej nowe i wyślij
             current_df = conn.read(worksheet="FLOTA_SQM", ttl="0")
             updated_df = pd.concat([current_df, new_row], ignore_index=True)
             conn.update(worksheet="FLOTA_SQM", data=updated_df)
-            st.success("Dodano!")
+            st.success("Dodano pomyślnie!")
             st.rerun()
 
 # ==========================================
-# 5. WYKRES GANTT
+# 5. HARMONOGRAM (GANTT)
 # ==========================================
 st.title("🚚 LOGISTYKA SQM: HARMONOGRAM")
 
-col1, col2 = st.columns(2)
-with col1:
+c1, c2 = st.columns(2)
+with c1:
     view_start = st.date_input("Widok od:", datetime.now().date() - timedelta(days=5))
-with col2:
+with c2:
     view_end = st.date_input("Widok do:", view_start + timedelta(days=45))
 
 if not df_main.empty:
     df_viz = df_main.copy()
     df_viz['Data_Koniec_Plot'] = df_viz['Data_Koniec'] + pd.Timedelta(days=1)
-    
-    # Kolejność pojazdów zgodna z Twoją listą (od góry do dołu)
     df_viz['Pojazd'] = pd.Categorical(df_viz['Pojazd'], categories=ALL_VEHICLES[::-1], ordered=True)
     df_viz = df_viz.sort_values('Pojazd')
 
@@ -133,7 +131,6 @@ if not df_main.empty:
         hover_data=["Kierowca", "Data_Start", "Data_Koniec"]
     )
 
-    # Aplikacja kolorów z arkusza
     fig.update_traces(
         marker_color=df_viz['Kolor_Projektu'],
         textposition='inside',
@@ -143,7 +140,7 @@ if not df_main.empty:
         marker_line_width=0.5
     )
 
-    # Ustawienia kalendarza (Oś X)
+    # Oś X - Kalendarz
     date_range = pd.date_range(view_start, view_end)
     tick_vals = [d for d in date_range]
     tick_text = []
@@ -164,27 +161,30 @@ if not df_main.empty:
         plot_bgcolor="white"
     )
 
-    # Linia dnia dzisiejszego
+    # Linia dzisiaj
     fig.add_vline(x=datetime.now().timestamp() * 1000, line_width=2, line_color="red")
 
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # ==========================================
-# 6. EDYCJA
+# 6. EDYCJA DANYCH (Z FIXEM DLA STARYCH WERSJI)
 # ==========================================
 st.markdown("---")
-with st.expander("🛠️ EDYCJA DANYCH I KOLORÓW"):
+with st.expander("🛠️ EDYCJA DANYCH (TABELA)"):
+    st.info("Aby zmienić kolor projektu w tabeli, wpisz kod HEX (np. #FF0000 dla czerwonego) lub użyj formularza w pasku bocznym.")
+    
     df_editor = df_main.copy()
     df_editor['Data_Start'] = df_editor['Data_Start'].dt.date
     df_editor['Data_Koniec'] = df_editor['Data_Koniec'].dt.date
     
+    # Usunięto st.column_config.ColorColumn na rzecz zwykłego TextColumn (kompatybilność)
     edited_df = st.data_editor(
         df_editor,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
             "Pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_VEHICLES),
-            "Kolor_Projektu": st.column_config.ColorColumn("Kolor paska"),
+            "Kolor_Projektu": st.column_config.TextColumn("Kolor HEX", help="Np. #facc15 (żółty), #3b82f6 (niebieski)"),
             "Data_Start": st.column_config.DateColumn("Start"),
             "Data_Koniec": st.column_config.DateColumn("Koniec")
         }
@@ -195,5 +195,5 @@ with st.expander("🛠️ EDYCJA DANYCH I KOLORÓW"):
         for col in ['Data_Start', 'Data_Koniec']:
             final_save[col] = pd.to_datetime(final_save[col]).dt.strftime('%Y-%m-%d')
         conn.update(worksheet="FLOTA_SQM", data=final_save)
-        st.success("Zaktualizowano arkusz!")
+        st.success("Zaktualizowano arkusz Google!")
         st.rerun()
