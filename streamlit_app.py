@@ -7,16 +7,16 @@ from datetime import datetime, timedelta
 # 1. KONFIGURACJA STRONY
 st.set_page_config(page_title="FLOTA SQM 2026", layout="wide", page_icon="🚚")
 
-# Custom CSS dla efektu "Excela" i lepszego kontrastu
+# Custom CSS dla ekstremalnej czytelności
 st.markdown("""
     <style>
-    .stApp { background-color: #f1f3f6; }
-    .css-1544g2n { background-color: white; border-radius: 10px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .block-container { padding-top: 2rem; }
+    .stApp { background-color: #f8f9fa; }
+    /* Stylizacja nagłówka osi X w Plotly */
+    .xtick text { font-size: 14px !important; font-weight: bold !important; fill: black !important; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🚚 FLOTA SQM 2026 | System Zarządzania")
+st.title("🚚 FLOTA SQM 2026")
 
 # 2. POŁĄCZENIE Z BAZĄ
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -26,47 +26,17 @@ def load_data():
     df = df.dropna(how='all').copy()
     df['Data_Start'] = pd.to_datetime(df['Data_Start'], errors='coerce')
     df['Data_Koniec'] = pd.to_datetime(df['Data_Koniec'], errors='coerce')
+    # Upewnienie się, że mamy kolumnę LDM (ładunek)
+    if 'LDM' not in df.columns:
+        df['LDM'] = ""
     return df.dropna(subset=['Data_Start', 'Data_Koniec'])
 
 df = load_data()
 
-# --- FUNKCJA WYKRYWANIA KOLIZJI ---
-def check_collisions(data):
-    conflicts = []
-    # Sprawdzamy każdy pojazd z osobna
-    for pojazd in data['Pojazd'].unique():
-        vehicle_df = data[data['Pojazd'] == pojazd].sort_values('Data_Start')
-        if len(vehicle_df) > 1:
-            for i in range(len(vehicle_df) - 1):
-                curr_end = vehicle_df.iloc[i]['Data_Koniec']
-                next_start = vehicle_df.iloc[i+1]['Data_Start']
-                if curr_end >= next_start:
-                    conflicts.append(f"⚠️ Kolizja: {pojazd} ({vehicle_df.iloc[i]['Projekt']} / {vehicle_df.iloc[i+1]['Projekt']})")
-    return conflicts
-
-# 3. STATYSTYKI KPI
-today = datetime.now()
-collisions = check_collisions(df)
-
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.metric("Pojazdy w trasie", len(df[(df['Data_Start'] <= today) & (df['Data_Koniec'] >= today)]))
-with c2:
-    st.metric("Nadchodzące (7 dni)", len(df[(df['Data_Start'] > today) & (df['Data_Start'] <= today + timedelta(days=7))]))
-with c3:
-    status_color = "normal" if not collisions else "inverse"
-    st.metric("Wykryte kolizje", len(collisions), delta=len(collisions), delta_color=status_color)
-with c4:
-    st.metric("Pojazdy w serwisie", len(df[df['Status'] == "Serwis"]))
-
-if collisions:
-    for c in collisions:
-        st.error(c)
-
-# 4. SIDEBAR - DODAWANIE
+# 3. SIDEBAR - DODAWANIE TRANSPORTU
 with st.sidebar:
-    st.header("➕ Dodaj Transport")
-    with st.form("new_transport", clear_on_submit=True):
+    st.header("⚙️ Nowy Transport")
+    with st.form("add_form", clear_on_submit=True):
         pojazd = st.selectbox("Pojazd", [
             "31 - TIR P21V388/P22X300 STABLEWSKI", "TIR 2 - W2654FT/P22H972 KOGUS",
             "TIR 3 - PNT3530A/P24U343 DANIELAK", "44 - SOLO PY 73262",
@@ -75,71 +45,95 @@ with st.sidebar:
         ])
         projekt = st.text_input("Nazwa Projektu / Targi")
         kierowca = st.text_input("Kierowca")
-        d_start = st.date_input("Wyjazd", value=today)
-        d_end = st.date_input("Powrót", value=today + timedelta(days=3))
+        ldm = st.text_input("Ładunek (np. 13.6 LDM, 24t)", help="Planowanie przestrzeni na naczepie")
+        
+        c1, c2 = st.columns(2)
+        d_start = c1.date_input("Wyjazd", value=datetime.now())
+        d_end = c2.date_input("Powrót", value=datetime.now() + timedelta(days=2))
+        
         status = st.selectbox("Status", ["Planowanie", "Potwierdzone", "W trasie", "Serwis"])
         
-        if st.form_submit_button("DODAJ DO GRAFIKU"):
+        if st.form_submit_button("ZAPISZ"):
             new_row = pd.DataFrame([{
                 "Pojazd": pojazd, "Projekt": projekt, "Data_Start": d_start.strftime('%Y-%m-%d'),
-                "Data_Koniec": d_end.strftime('%Y-%m-%d'), "Kierowca": kierowca, "Status": status
+                "Data_Koniec": d_end.strftime('%Y-%m-%d'), "Kierowca": kierowca, "Status": status, "LDM": ldm
             }])
-            current = conn.read(worksheet="FLOTA_SQM", ttl="0")
-            conn.update(worksheet="FLOTA_SQM", data=pd.concat([current, new_row], ignore_index=True))
+            full_df = pd.concat([conn.read(worksheet="FLOTA_SQM", ttl="0"), new_row], ignore_index=True)
+            conn.update(worksheet="FLOTA_SQM", data=full_df)
             st.rerun()
 
-# 5. PODRASOWANY WYKRES (WIDOK EXCELOWY)
-st.subheader("🗓️ Harmonogram Dzienny Floty")
+# 4. GRAFIK GANTTA - POPRAWIONA WIDOCZNOŚĆ
+st.subheader("🗓️ Harmonogram Dzienny")
 
-# Filtr zakresu dla lepszej przejrzystości
-view_range = st.date_input("Widok kalendarza:", [today - timedelta(days=5), today + timedelta(days=20)])
+today = datetime.now()
+df_viz = df.copy()
+df_viz['Viz_End'] = df_viz['Data_Koniec'] + pd.Timedelta(days=1)
 
-if len(view_range) == 2:
-    df_viz = df.copy()
-    # Pasek musi wizualnie domykać dzień powrotu
-    df_viz['Viz_End'] = df_viz['Data_Koniec'] + pd.Timedelta(days=1)
-    
-    fig = px.timeline(
-        df_viz, x_start="Data_Start", x_end="Viz_End", y="Pojazd", color="Status",
-        text="Projekt", hover_data=["Kierowca"],
-        color_discrete_map={
-            "Planowanie": "#FAD02E", "Potwierdzone": "#45B6FE", 
-            "W trasie": "#37BC61", "Serwis": "#E1341E"
-        }
-    )
+# Tworzenie wykresu
+fig = px.timeline(
+    df_viz, 
+    x_start="Data_Start", 
+    x_end="Viz_End", 
+    y="Pojazd", 
+    color="Status",
+    text="Projekt", # Projekt wyświetla się na pasku
+    hover_data=["Kierowca", "LDM"],
+    color_discrete_map={
+        "Planowanie": "#FAD02E", "Potwierdzone": "#45B6FE", 
+        "W trasie": "#37BC61", "Serwis": "#E1341E"
+    }
+)
 
-    # Ustawienie "Siatki Excelowej"
-    fig.update_xaxes(
-        dtick="D1", # Linia co 1 dzień
-        tickformat="%d\n%b", 
-        gridcolor="#E0E0E0", 
-        side="top",
-        range=[view_range[0], view_range[1]]
-    )
-    
-    fig.update_yaxes(autorange="reversed", gridcolor="#F0F0F0")
-    
-    # Linia DZIŚ
-    fig.add_vline(x=today.timestamp() * 1000, line_width=2, line_color="red", line_dash="solid")
+# --- KLUCZOWE USTAWIENIA WIDOCZNOŚCI ---
+fig.update_xaxes(
+    dtick="D1",             # Pionowa linia dla każdego dnia
+    tickformat="%d\n%b",    # Dzień i Skrót Miesiąca (np. 27 Jan)
+    tickfont=dict(size=14, color="black", family="Arial Black"), # Duże, czarne napisy
+    gridcolor="LightGrey", 
+    showgrid=True,
+    side="top",             # Etykiety na górze (lepiej widoczne przy skrolowaniu)
+    title_text="KALENDARZ LOGISTYCZNY 2026"
+)
 
-    fig.update_layout(
-        height=600, margin=dict(l=0, r=0, t=40, b=0),
-        plot_bgcolor="white",
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5)
-    )
+fig.update_yaxes(
+    autorange="reversed", 
+    tickfont=dict(size=12, color="black", family="Arial"),
+    gridcolor="whitesmoke"
+)
 
-    st.plotly_chart(fig, use_container_width=True)
+# Czerwona linia 'DZIŚ'
+fig.add_vline(x=today.timestamp() * 1000, line_width=3, line_color="red")
 
-# 6. EDYCJA I ZAPIS
-with st.expander("📝 Edytuj bazę i sloty transportowe"):
+fig.update_layout(
+    height=600,
+    margin=dict(l=10, r=10, t=80, b=10), # Większy margines na górze dla dat
+    plot_bgcolor="white",
+    showlegend=True,
+    legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5)
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# 5. TABELA EDYCJI Z LDM
+st.markdown("---")
+with st.expander("📝 Zarządzanie slotami i przestrzenią (LDM)", expanded=True):
     df_edit = df.copy()
     df_edit['Data_Start'] = df_edit['Data_Start'].dt.date
     df_edit['Data_Koniec'] = df_edit['Data_Koniec'].dt.date
     
-    edited = st.data_editor(df_edit, num_rows="dynamic", use_container_width=True)
+    edited_df = st.data_editor(
+        df_edit, 
+        num_rows="dynamic", 
+        use_container_width=True,
+        column_config={
+            "LDM": st.column_config.TextColumn("Ładunek / LDM", placeholder="np. 13.6 LDM"),
+            "Status": st.column_config.SelectboxColumn("Status", options=["Planowanie", "Potwierdzone", "W trasie", "Serwis"]),
+            "Data_Start": st.column_config.DateColumn("Wyjazd"),
+            "Data_Koniec": st.column_config.DateColumn("Powrót")
+        }
+    )
     
-    if st.button("💾 ZAPISZ ZMIANY W GOOGLE SHEETS"):
-        conn.update(worksheet="FLOTA_SQM", data=edited)
-        st.success("Baza zaktualizowana!")
+    if st.button("💾 AKTUALIZUJ ARKUSZ GOOGLE"):
+        conn.update(worksheet="FLOTA_SQM", data=edited_df)
+        st.success("Dane zapisane!")
         st.rerun()
