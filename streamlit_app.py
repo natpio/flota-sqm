@@ -14,16 +14,20 @@ def load_data():
         # Odczyt danych z arkusza FLOTA_SQM
         data = conn.read(ttl="0s")
         if data is None or data.empty:
-            return pd.DataFrame(columns=["Pojazd", "EVENT", "Start", "Koniec", "TYP", "Kierowca", "Notatka"])
+            return pd.DataFrame(columns=["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"])
 
-        # Ujednolicenie nazw kolumn na małe litery do obróbki w Pythonie
+        # Ujednolicenie nazw kolumn na małe litery
         data.columns = [c.strip().lower() for c in data.columns]
+        
+        # Usuwamy kolumnę typ, jeśli jakimś cudem jeszcze tam jest w danych wejściowych
+        if 'typ' in data.columns:
+            data = data.drop(columns=['typ'])
         
         # Konwersja dat na format czytelny dla wykresu
         data['start'] = pd.to_datetime(data['start'], errors='coerce')
         data['koniec'] = pd.to_datetime(data['koniec'], errors='coerce')
         
-        # Filtrujemy tylko wiersze, które mają minimum danych do wyświetlenia
+        # Filtrujemy tylko wiersze z kluczowymi danymi
         return data.dropna(subset=['pojazd', 'start', 'koniec'])
     except Exception as e:
         st.error(f"Błąd ładowania danych: {e}")
@@ -35,27 +39,16 @@ st.title("🚚 SQM Multimedia Solutions - Zarządzanie Flotą")
 
 # --- WIZUALIZACJA ---
 if not df.empty:
-    # Definiujemy kolory dla typów zadań (odpowiedniki kolorów z Twojego Excela)
-    color_map = {
-        "TARGI": "#1f77b4",      # Niebieski
-        "TRANSPORT": "#ff7f0e",  # Pomarańczowy
-        "SERWIS": "#d62728",     # Czerwony
-        "MAGAZYN": "#bcbd22",    # Żółty
-        "BCN": "#e377c2",        # Różowy (Barcelona)
-        "STAŁE": "#7f7f7f"       # Szary
-    }
-
-    # Tworzenie wykresu
+    # Tworzenie wykresu - teraz kolorujemy według 'event', żeby paski się różniły
     fig = px.timeline(
         df, 
         x_start="start", 
         x_end="koniec", 
         y="pojazd", 
-        color="typ",
+        color="event",
         hover_name="event",
         text="event",
-        custom_data=["kierowca", "notatka"],
-        color_discrete_map=color_map
+        custom_data=["kierowca", "notatka"]
     )
     
     # Estetyka wykresu
@@ -66,7 +59,7 @@ if not df.empty:
     fig.update_layout(
         height=600,
         margin=dict(l=20, r=20, t=40, b=20),
-        legend_title_text="Rodzaj zadania",
+        showlegend=False, # Ukrywamy legendę, bo przy 200 eventach byłaby nieczytelna
         hoverlabel=dict(bgcolor="white", font_size=12)
     )
     
@@ -74,38 +67,39 @@ if not df.empty:
 else:
     st.info("Dodaj dane w tabeli poniżej, aby wygenerować harmonogram.")
 
-# --- PANEL EDYCJI ---
 st.divider()
+
+# --- PANEL EDYCJI ---
 st.subheader("📋 Panel Edycji i Planowania")
 
-# Konfiguracja kolumn w edytorze
+# Konfiguracja kolumn w edytorze (bez TYP)
 edited_df = st.data_editor(
-    df if not df.empty else pd.DataFrame(columns=["pojazd", "event", "start", "koniec", "typ", "kierowca", "notatka"]),
+    df if not df.empty else pd.DataFrame(columns=["pojazd", "event", "start", "koniec", "kierowca", "notatka"]),
     num_rows="dynamic",
     use_container_width=True,
     column_config={
         "start": st.column_config.DateColumn("Start", format="YYYY-MM-DD"),
         "koniec": st.column_config.DateColumn("Koniec", format="YYYY-MM-DD"),
-        "typ": st.column_config.SelectboxColumn("TYP", options=["TARGI", "TRANSPORT", "SERWIS", "MAGAZYN", "BCN", "STAŁE"]),
-        "pojazd": st.column_config.TextColumn("Pojazd")
+        "pojazd": st.column_config.TextColumn("Pojazd"),
+        "event": st.column_config.TextColumn("EVENT")
     },
-    key="sqm_v3_editor"
+    key="sqm_v4_editor"
 )
 
 # Przycisk zapisu
 col1, col2 = st.columns([1, 4])
 with col1:
     if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
-        # Przygotowanie do zapisu - przywracamy oryginalne nazwy kolumn z Twojego arkusza
+        # Przygotowanie do zapisu - nazwy kolumn dokładnie jak w Twoim arkuszu (bez TYP)
         save_df = edited_df.copy()
-        save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "TYP", "Kierowca", "Notatka"]
+        save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
         
-        # Konwersja dat na tekst przed wysyłką do Google
+        # Konwersja dat na tekst
         save_df['Start'] = save_df['Start'].astype(str)
         save_df['Koniec'] = save_df['Koniec'].astype(str)
         
         conn.update(data=save_df)
-        st.success("Zsynchronizowano z Google Sheets!")
+        st.success("Zapisano!")
         st.rerun()
 
 # --- ANALIZA KOLIZJI ---
@@ -113,12 +107,14 @@ with col2:
     def check_conflicts(d):
         if d.empty: return []
         conf = []
+        # Sortujemy po pojeździe i czasie startu
         d = d.sort_values(['pojazd', 'start'])
         for v in d['pojazd'].unique():
             v_data = d[d['pojazd'] == v]
             for i in range(len(v_data)-1):
+                # Jeśli koniec obecnego zadania jest później niż start następnego
                 if v_data.iloc[i]['koniec'] > v_data.iloc[i+1]['start']:
-                    conf.append(f"⚠️ {v}: {v_data.iloc[i]['event']} nachodzi na {v_data.iloc[i+1]['event']}")
+                    conf.append(f"⚠️ {v}: {v_data.iloc[i]['event']} koliduje z {v_data.iloc[i+1]['event']}")
         return conf
 
     alerts = check_conflicts(edited_df)
