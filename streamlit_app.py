@@ -49,7 +49,7 @@ st.markdown("""
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.8 (Search & Conflict Control)</p>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.9 (Sorting & Search Fix)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -70,13 +70,19 @@ def get_data():
     try:
         raw = conn.read(ttl="0s")
         raw.columns = [str(c).strip().lower() for c in raw.columns]
+        # Konwersja dat z obsługą błędów
         raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
         raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
-        skeleton = pd.DataFrame({'pojazd': ALL_ASSETS})
-        merged = pd.merge(skeleton, raw, on='pojazd', how='left')
-        return merged.fillna("")
+        
+        # Filtrowanie tylko wierszy z pojazdem (pomijamy puste)
+        raw = raw[raw['pojazd'].notna() & (raw['pojazd'] != "")]
+        
+        # Domyślne sortowanie po dacie startu (najnowsze na górze)
+        raw = raw.sort_values(by='start', ascending=False)
+        
+        return raw.fillna("")
     except:
-        return pd.DataFrame({'pojazd': ALL_ASSETS, 'event': '', 'start': pd.NaT, 'koniec': pd.NaT, 'kierowca': '', 'notatka': ''})
+        return pd.DataFrame(columns=['pojazd', 'event', 'start', 'koniec', 'kierowca', 'notatka'])
 
 df = get_data()
 
@@ -108,7 +114,7 @@ st.session_state["active_tab_index"] = tab_titles.index(active_tab)
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 6. WYKRES (go.Bar - Bulletproof Mode)
+# 6. WYKRES (go.Bar Bulletproof)
 # -----------------------------------------------------------------------------
 if active_tab in RESOURCES:
     assets_to_show = RESOURCES[active_tab]
@@ -148,38 +154,34 @@ if active_tab in RESOURCES:
         st.info(f"Brak projektów dla: {active_tab}")
 
 # -----------------------------------------------------------------------------
-# 7. PANEL EDYCJI Z WYSZUKIWARKĄ I SORTOWANIEM
+# 7. PANEL EDYCJI (FIX SORTOWANIA I WYSZUKIWANIA)
 # -----------------------------------------------------------------------------
 elif active_tab == "🔧 EDYCJA / ARKUSZ":
     st.subheader("Główny Panel Zarządzania")
     
-    # --- FILTROWANIE I WYSZUKIWANIE ---
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        search_query = st.text_input("🔍 WYSZUKAJ (Pojazd, Projekt, Kierowca, Notatka):", "").lower()
+    # 1. Wyszukiwarka
+    search_q = st.text_input("🔍 Szukaj w całej bazie (auto, event, kierowca):", "").lower()
     
-    # Kopia danych do edycji
-    edit_df = df.copy()
+    # 2. Przygotowanie danych do tabeli
+    display_df = df.copy()
     
-    # Zastosowanie wyszukiwarki
-    if search_query:
-        mask = (
-            edit_df['pojazd'].str.lower().str.contains(search_query) |
-            edit_df['event'].str.lower().str.contains(search_query) |
-            edit_df['kierowca'].str.lower().str.contains(search_query) |
-            edit_df['notatka'].str.lower().str.contains(search_query)
-        )
-        edit_df = edit_df[mask]
+    # Rzutowanie na string dla wyszukiwarki
+    for col in display_df.columns:
+        display_df[col] = display_df[col].astype(str)
 
-    # --- EDYTOR ---
-    st.info("💡 Kliknij w nagłówek kolumny, aby posortować dane.")
+    if search_q:
+        display_df = display_df[display_df.apply(lambda row: row.astype(str).str.contains(search_q).any(), axis=1)]
+
+    # 3. Edytor danych (Sortowanie działa przez kliknięcie w nagłówek)
+    st.info("👆 Kliknij nagłówek kolumny, aby sortować (A-Z, Z-A, Daty).")
     
     edited_df = st.data_editor(
-        edit_df,
+        display_df,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
         height=700,
+        key="main_editor",
         column_config={
             "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=ALL_ASSETS, width=300, required=True),
             "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
@@ -190,38 +192,34 @@ elif active_tab == "🔧 EDYCJA / ARKUSZ":
         }
     )
 
-    if st.button("💾 ZAPISZ ZMIANY (WERYFIKACJA KOLIZJI)", use_container_width=True):
-        # Pobieramy pełne dane (nie tylko przefiltrowane), aby sprawdzić kolizje z całym arkuszem
-        # Łączymy zmiany z przefiltrowanego widoku z resztą danych
-        if search_query:
-            full_data = df.copy()
-            full_data.update(edited_df)
-        else:
-            full_data = edited_df.copy()
-            
-        valid_data = full_data[full_data['event'] != ""].copy()
-        valid_data['start'] = pd.to_datetime(valid_data['start'])
-        valid_data['koniec'] = pd.to_datetime(valid_data['koniec'])
+    if st.button("💾 ZAPISZ I SPRAWDŹ KOLIZJE", use_container_width=True):
+        # Konwersja dat przed walidacją
+        check_df = edited_df[edited_df['event'] != ""].copy()
+        check_df['start'] = pd.to_datetime(check_df['start'], errors='coerce')
+        check_df['koniec'] = pd.to_datetime(check_df['koniec'], errors='coerce')
         
+        # Logika kolizji
         conflicts = []
-        for pojazd in valid_data['pojazd'].unique():
-            vehicle_reservations = valid_data[valid_data['pojazd'] == pojazd].sort_values('start')
-            res_list = vehicle_reservations.to_dict('records')
+        for p in check_df['pojazd'].unique():
+            v_res = check_df[check_df['pojazd'] == p].sort_values('start')
+            res_list = v_res.to_dict('records')
             for i in range(len(res_list)):
                 for j in range(i + 1, len(res_list)):
                     r1, r2 = res_list[i], res_list[j]
-                    if (r1['start'] < r2['koniec']) and (r2['start'] < r1['koniec']):
-                        conflicts.append(f"🔴 **{pojazd}**: Kolizja '{r1['event']}' vs '{r2['event']}' ({r1['start'].date()} - {r1['koniec'].date()})")
+                    if pd.notnull(r1['start']) and pd.notnull(r2['start']):
+                        if (r1['start'] < r2['koniec']) and (r2['start'] < r1['koniec']):
+                            conflicts.append(f"🔴 **{p}**: Kolizja '{r1['event']}' vs '{r2['event']}'")
 
         if conflicts:
-            st.error("### ❌ BLOKADA ZAPISU - WYKRYTO KOLIZJE!")
+            st.error("### ❌ BLOKADA ZAPISU - KOLIZJE DAT!")
             for c in conflicts:
                 st.write(c)
         else:
-            save_df = valid_data.copy()
+            # Formatowanie do zapisu
+            save_df = check_df.copy()
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
             save_df['Start'] = save_df['Start'].dt.strftime('%Y-%m-%d')
             save_df['Koniec'] = save_df['Koniec'].dt.strftime('%Y-%m-%d')
             conn.update(data=save_df)
-            st.success("✅ Zapisano pomyślnie!")
+            st.success("✅ Dane zapisane w Google Sheets!")
             st.rerun()
