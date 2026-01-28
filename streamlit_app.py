@@ -34,8 +34,8 @@ st.markdown("""
     </style>
     
     <div class="sqm-header">
-        <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">System Zarządzania Zasobami v8.6</p>
+        <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM FLOTA</h1>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">System Zarządzania Zasobami</p>
     </div>
     """, unsafe_allow_html=True)
 
