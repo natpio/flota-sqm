@@ -3,60 +3,60 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
-import streamlit.components.v1 as components
 
-# 1. Konfiguracja i Wstrzyknięcie Naprawy Suwaka przez JS
-st.set_page_config(page_title="SQM LOGISTICS | Data Center", layout="wide")
-
-# Skrypt JS, który co 1 sekundę sprawdza czy tabela jest widoczna i wymusza scroll
-components.html(
-    """
-    <script>
-    const fixScroll = () => {
-        const editors = window.parent.document.querySelectorAll('[data-testid="stDataEditor"]');
-        editors.forEach(editor => {
-            const container = editor.querySelector('.st-emotion-cache-1wrc664') || editor;
-            container.style.overflow = 'auto';
-            container.style.minWidth = '100%';
-        });
-    }
-    setInterval(fixScroll, 1000);
-    </script>
-    """,
-    height=0,
-)
+# 1. Konfiguracja strony i Modern Business UI
+st.set_page_config(page_title="SQM LOGISTICS | Fleet Center", layout="wide")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
 
-    .stApp { background-color: #f8fafc; font-family: 'Inter', sans-serif; }
+    /* Tło z większym kontrastem dla suwaków */
+    .stApp { 
+        background-color: #f1f5f9; 
+        font-family: 'Inter', sans-serif;
+    }
 
-    /* Nagłówek */
-    .header-bar {
-        background: #0f172a;
-        padding: 1.5rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
+    /* Profesjonalny Granatowy Header */
+    .header-container {
+        background-color: #0f172a;
+        padding: 1.5rem 2rem;
+        border-radius: 12px;
         color: white;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
 
-    /* Wymuszenie widoczności suwaków przez CSS (Metoda pomocnicza) */
-    [data-testid="stDataEditor"] div {
-        overflow: auto !important;
+    /* Kontener wykresu z wyraźną krawędzią */
+    .stPlotlyChart {
+        background-color: #ffffff;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 12px !important;
+        padding: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
 
-    /* Stylizacja zakładek */
-    .stTabs [data-baseweb="tab-list"] {
-        background-color: #f1f5f9;
-        padding: 5px;
-        border-radius: 10px;
+    /* Stylizacja Suwaka Daty */
+    div[data-baseweb="slider"] {
+        margin-top: 10px;
+        margin-bottom: 20px;
+    }
+
+    /* Przyciski systemowe */
+    .stButton>button {
+        background-color: #2563eb;
+        color: white;
+        font-weight: 700;
+        border-radius: 8px;
+        border: none;
+        padding: 0.75rem 2rem;
+        width: 100%;
     }
     </style>
-
-    <div class="header-bar">
-        <h2 style="margin:0;">SQM LOGISTICS <span style="color:#2563eb;">|</span> CONTROL CENTER</h2>
-        <p style="margin:0; opacity:0.6; font-size:0.8rem;">Build 2026.01.28 | Stability Update</p>
+    
+    <div class="header-container">
+        <h2 style="margin:0; font-weight:900;">SQM LOGISTICS CONTROL</h2>
+        <p style="margin:0; opacity:0.7; font-size:0.85rem;">ASSET & FLEET NAVIGATOR v5.3</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -101,41 +101,77 @@ def get_data():
 
 df = get_data()
 
-# 4. DASHBOARD
-tabs = st.tabs(list(RESOURCES.keys()) + ["🛠️ ZARZĄDZANIE"])
+# 4. NOWOŚĆ: INTERAKTYWNY NAWIGATOR DAT (Slider)
+st.sidebar.header("🛠️ USTAWIENIA WIDOKU")
+min_date = datetime(2026, 1, 1)
+max_date = datetime(2026, 12, 31)
+
+date_range = st.sidebar.date_input(
+    "Zakres dat widoku:",
+    value=(datetime.now() - timedelta(days=2), datetime.now() + timedelta(days=14)),
+    min_value=min_date,
+    max_value=max_date,
+    key="navigator_slider"
+)
+
+# Walidacja wyboru daty
+if len(date_range) == 2:
+    start_view, end_view = date_range
+else:
+    start_view, end_view = datetime.now(), datetime.now() + timedelta(days=14)
+
+# 5. MODUŁ OPERACYJNY
+tabs = st.tabs(list(RESOURCES.keys()) + ["⚙️ ZARZĄDZANIE"])
+
+colors = ["#1e40af", "#0369a1", "#0891b2", "#0d9488", "#16a34a", "#ca8a04", "#dc2626"]
+event_colors = {ev: colors[i % len(colors)] for i, ev in enumerate(sorted(df['event'].unique()))}
 
 for i, category in enumerate(RESOURCES.keys()):
     with tabs[i]:
         cat_df = df[df['pojazd'].isin(RESOURCES[category])].copy()
         if not cat_df.empty:
-            fig = px.timeline(cat_df, x_start="start", x_end="koniec", y="pojazd", color="event", template="plotly_white")
-            fig.update_layout(height=len(RESOURCES[category])*45 + 100, showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
+            fig = px.timeline(
+                cat_df, x_start="start", x_end="koniec", y="pojazd",
+                color="event", text="event", color_discrete_map=event_colors,
+                category_orders={"pojazd": RESOURCES[category]}, template="plotly_white"
+            )
+            fig.update_xaxes(
+                side="top", showgrid=True, gridcolor="#f1f5f9",
+                tickformat="%d\n%b", dtick=86400000.0,
+                range=[start_view, end_view] # TU DZIAŁA TWÓJ SUWAK
+            )
+            fig.update_layout(
+                height=len(RESOURCES[category]) * 45 + 100,
+                margin=dict(l=10, r=10, t=50, b=10),
+                showlegend=False, bargap=0.3
+            )
+            fig.add_vline(x=datetime.now().timestamp()*1000, line_width=2, line_color="#ef4444")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Brak aktywnych zadań.")
+            st.info(f"Brak danych dla: {category}")
 
-# 5. ZARZĄDZANIE - WYMUSZONY SCROLL PRZEZ SZTYWNE SZEROKOŚCI
+# 6. ZARZĄDZANIE (Naprawione wizualnie)
 with tabs[-1]:
-    st.markdown("### Edycja bazy danych (Użyj Shift + Scroll, jeśli suwak boczny nie reaguje)")
+    st.subheader("Baza Danych Floty")
+    st.markdown("💡 *Wskazówka: Jeśli nie widzisz suwaków bocznych, kliknij wewnątrz tabeli i użyj strzałek na klawiaturze.*")
     
     edited_df = st.data_editor(
         df, 
         num_rows="dynamic", 
         use_container_width=True,
+        hide_index=True, # Więcej miejsca w poziomie
         height=500,
         column_config={
-            "pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_RESOURCES, width="large"),
-            "event": st.column_config.TextColumn("Projekt / Event", width="medium"),
+            "pojazd": st.column_config.SelectboxColumn("Zasób", options=ALL_RESOURCES, width="medium"),
+            "event": st.column_config.TextColumn("Projekt", width="medium"),
             "start": st.column_config.DateColumn("Start", width="small"),
             "koniec": st.column_config.DateColumn("Koniec", width="small"),
-            "kierowca": st.column_config.TextColumn("Kierowca", width="medium"),
-            "notatka": st.column_config.TextColumn("Notatki", width="large")
         },
-        key="js_scroll_fix_editor"
+        key="navigator_editor"
     )
     
-    if st.button("ZAPISZ WSZYSTKIE ZMIANY"):
-        with st.status("Aktualizacja arkusza..."):
+    if st.button("ZAPISZ I SYNCHRONIZUJ"):
+        with st.status("Aktualizacja danych..."):
             save_df = edited_df.copy()
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
             save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
