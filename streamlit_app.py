@@ -4,56 +4,63 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja i Wymuszenie Widocznych Suwaków
-st.set_page_config(page_title="SQM LOGISTICS | Fleet", layout="wide")
+# 1. Konfiguracja i EKSTREMALNY KONTRAST dla suwaków
+st.set_page_config(page_title="SQM LOGISTICS | Fleet Center", layout="wide")
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
 
-    /* Tło strony dla kontrastu */
     .stApp { background-color: #f1f5f9; font-family: 'Inter', sans-serif; }
 
-    /* WYMUSZENIE WIDOCZNYCH I KOLOROWYCH SUWAKÓW - KLUCZOWE */
+    /* --- GIGANTYCZNE I KOLOROWE SUWAKI (SCROLLBARS) --- */
+    /* Robimy je na tyle duże i jaskrawe, by nie mogły się zlać z tabelą */
     ::-webkit-scrollbar {
-        width: 16px !important;
-        height: 16px !important;
-        display: block !important;
+        width: 22px !important;
+        height: 22px !important;
     }
     ::-webkit-scrollbar-track {
-        background: #cbd5e1 !important; /* Szary tor */
-        border-radius: 4px !important;
+        background: #1e293b !important; /* Bardzo ciemny tor */
     }
     ::-webkit-scrollbar-thumb {
-        background: #1e40af !important; /* Ciemnoniebieski suwak - musi być widoczny! */
+        background: #f97316 !important; /* Jaskrawy pomarańczowy suwak */
         border-radius: 4px !important;
-        border: 2px solid #cbd5e1 !important;
+        border: 4px solid #1e293b !important;
     }
     ::-webkit-scrollbar-thumb:hover {
-        background: #1d4ed8 !important;
+        background: #fb923c !important;
     }
 
-    /* Nagłówek SQM */
-    .header-box {
-        background-color: #0f172a;
+    /* Stylizacja nagłówka i kontenerów */
+    .header-bar {
+        background: #0f172a;
         padding: 1.5rem;
-        border-radius: 8px;
+        border-radius: 12px;
         color: white;
-        margin-bottom: 20px;
-        border-left: 10px solid #2563eb;
+        margin-bottom: 2rem;
+        border-bottom: 5px solid #f97316;
     }
-
-    /* Kontener wykresu */
+    
     .stPlotlyChart {
         background-color: white !important;
-        padding: 15px !important;
-        border-radius: 8px !important;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1) !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 12px !important;
+    }
+
+    /* Instrukcja sterowania */
+    .nav-hint {
+        background-color: #ffedd5;
+        border-left: 5px solid #f97316;
+        padding: 10px;
+        margin-bottom: 15px;
+        color: #9a3412;
+        font-weight: 600;
+        font-size: 0.9rem;
     }
     </style>
 
-    <div class="header-box">
-        <h1 style="margin:0; font-size: 2rem;">SQM LOGISTICS <span style="font-weight:300;">| Control Center</span></h1>
+    <div class="header-bar">
+        <h1 style="margin:0;">SQM LOGISTICS <span style="font-weight:300;">| Fleet Control</span></h1>
     </div>
     """, unsafe_allow_html=True)
 
@@ -83,95 +90,73 @@ RESOURCES = {
 }
 ALL_RESOURCES = [item for sublist in RESOURCES.values() for item in sublist]
 
-# 3. POŁĄCZENIE Z DANYMI
+# 3. DANE
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-@st.cache_data(ttl=0)
 def get_data():
-    data = conn.read()
-    data.columns = [c.strip().lower() for c in data.columns]
-    data['start'] = pd.to_datetime(data['start'], errors='coerce')
-    data['koniec'] = pd.to_datetime(data['koniec'], errors='coerce')
-    return data.fillna("")
+    try:
+        data = conn.read(ttl="0s")
+        data.columns = [c.strip().lower() for c in data.columns]
+        data['start'] = pd.to_datetime(data['start'], errors='coerce')
+        data['koniec'] = pd.to_datetime(data['koniec'], errors='coerce')
+        return data.fillna("")
+    except:
+        return pd.DataFrame(columns=["pojazd", "event", "start", "koniec", "kierowca", "notatka"])
 
 df = get_data()
 
-# 4. SIDEBAR - TWOJE STEROWANIE WIDOKIEM
+# 4. SIDEBAR - Sterowanie datą (Zamiast scrolla poziomego na wykresie)
 with st.sidebar:
-    st.header("🔍 Ustawienia widoku")
-    
-    # Wybór zakresu dat zastępuje suwak poziomy
+    st.header("⚙️ Widok Czasowy")
     today = datetime.now()
     date_range = st.date_input(
-        "Wybierz zakres dat na wykresie:",
+        "Wybierz okno czasowe:",
         value=(today - timedelta(days=2), today + timedelta(days=21)),
-        key="date_range_picker"
+        key="global_date_range"
     )
-    
-    st.divider()
-    st.info("Pasek boczny pozwala precyzyjnie ustawić okno czasowe bez szukania suwaka pod tabelą.")
 
-# Logika zakresu dat
+# Wyznaczanie zakresu
 if isinstance(date_range, tuple) and len(date_range) == 2:
-    start_v, end_v = date_range
+    s_view, e_view = date_range
 else:
-    start_v, end_v = today - timedelta(days=2), today + timedelta(days=21)
+    s_view, e_view = today - timedelta(days=2), today + timedelta(days=21)
 
-# 5. GŁÓWNE ZAKŁADKI
-tabs = st.tabs(list(RESOURCES.keys()) + ["📝 ZARZĄDZANIE DANYMI"])
-
-# Kolory eventów
-unique_events = sorted(df['event'].unique())
-colors = ["#1e40af", "#1d4ed8", "#2563eb", "#3b82f6", "#60a5fa", "#93c5fd"]
-event_colors = {ev: colors[i % len(colors)] for i, ev in enumerate(unique_events)}
+# 5. MODUŁ OPERACYJNY
+tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 EDYCJA BAZY"])
 
 for i, category in enumerate(RESOURCES.keys()):
     with tabs[i]:
         cat_df = df[df['pojazd'].isin(RESOURCES[category])].copy()
         if not cat_df.empty:
-            fig = px.timeline(
-                cat_df, x_start="start", x_end="koniec", y="pojazd",
-                color="event", text="event", color_discrete_map=event_colors,
-                category_orders={"pojazd": RESOURCES[category]}, template="plotly_white"
-            )
-            fig.update_xaxes(
-                side="top", showgrid=True, gridcolor="#f1f5f9",
-                tickformat="%d\n%b", dtick=86400000.0,
-                range=[start_v, end_v]
-            )
-            fig.update_layout(
-                height=len(RESOURCES[category]) * 50 + 100,
-                margin=dict(l=10, r=10, t=50, b=10),
-                showlegend=False, bargap=0.3
-            )
-            fig.add_vline(x=today.timestamp()*1000, line_width=3, line_color="#ef4444")
+            fig = px.timeline(cat_df, x_start="start", x_end="koniec", y="pojazd", color="event", template="plotly_white")
+            fig.update_xaxes(side="top", range=[s_view, e_view], tickformat="%d\n%b", dtick=86400000.0)
+            fig.update_layout(height=len(RESOURCES[category])*50 + 100, showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("Brak wpisów dla tej kategorii.")
+            st.info("Brak zadań w wybranym zakresie.")
 
-# 6. ZAKŁADKA ZARZĄDZANIA
+# 6. ZARZĄDZANIE - Sterowanie klawiaturą
 with tabs[-1]:
-    st.subheader("Edycja Bazy Danych")
+    st.markdown('<div class="nav-hint">⌨️ NAWIGACJA: Kliknij w komórkę i używaj STRZAŁEK, aby się poruszać. Użyj TAB, aby przejść do kolejnej kolumny (np. Notatki).</div>', unsafe_allow_html=True)
     
-    # Wymuszamy wysokość i szerokość kolumn, aby suwak musiał się pojawić
     edited_df = st.data_editor(
         df, 
         num_rows="dynamic", 
         use_container_width=True,
-        height=600,
+        height=550,
         column_config={
-            "pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_RESOURCES, width="large"),
-            "event": st.column_config.TextColumn("Nazwa Projektu", width="medium"),
-            "start": st.column_config.DateColumn("Data Start", width="small"),
-            "koniec": st.column_config.DateColumn("Data Koniec", width="small"),
-            "kierowca": st.column_config.TextColumn("Kierowca", width="medium"),
-            "notatka": st.column_config.TextColumn("Uwagi", width="large")
+            "pojazd": st.column_config.SelectboxColumn("🚛 Pojazd", options=ALL_RESOURCES, width="large"),
+            "event": st.column_config.TextColumn("📋 Event", width="medium"),
+            "start": st.column_config.DateColumn("📅 Start", width="small"),
+            "koniec": st.column_config.DateColumn("🏁 Koniec", width="small"),
+            "kierowca": st.column_config.TextColumn("👤 Kierowca", width="medium"),
+            "notatka": st.column_config.TextColumn("📝 Notatki", width="large")
         },
-        key="main_editor_v6"
+        key="keyboard_editor_v6"
     )
     
-    if st.button("💾 ZAPISZ I SYNCHRONIZUJ ARKUSZ"):
-        with st.status("Trwa zapisywanie..."):
+    if st.button("ZAPISZ ZMIANY W ARKUSZU"):
+        with st.status("Synchronizacja..."):
             save_df = edited_df.copy()
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
             save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
