@@ -3,7 +3,6 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import io
 
 # -----------------------------------------------------------------------------
 # 1. LOGOWANIE
@@ -43,16 +42,20 @@ st.markdown("""
         margin-bottom: 1.5rem; border-left: 8px solid #2563eb;
     }
     [data-testid="stDataEditor"] div { font-size: 16px !important; }
-    .stButton>button { border-radius: 8px; font-weight: bold; }
+    .conflict-box {
+        background-color: #fee2e2; border: 2px solid #ef4444; padding: 1rem;
+        border-radius: 8px; color: #b91c1c; margin-top: 1rem; margin-bottom: 1rem;
+    }
+    .stButton>button { border-radius: 8px; font-weight: bold; height: 3rem; }
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 2.8rem; letter-spacing: -2px;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v20.0 (Data Safety & Export Edition)</p>
+        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v23.0 | System Kontroli Kolizji</p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. ZASOBY
+# 3. ZASOBY I DANE
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": ["31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS", "TIR 3- PNT3530A/PZ4U343 DANIELAK", "44 - SOLO PY 73262", "45 - PY1541M + przyczepa", "SPEDYCJA", "AUTO RENTAL"],
@@ -82,149 +85,153 @@ if "main_df" not in st.session_state:
     st.session_state.main_df = get_data()
 
 # -----------------------------------------------------------------------------
-# 4. SIDEBAR
+# 4. FUNKCJA ANALIZY KOLIZJI
+# -----------------------------------------------------------------------------
+def get_collisions(df):
+    conflicts = []
+    # Kopia do analizy z poprawnymi formatami
+    check_df = df.copy()
+    check_df['start'] = pd.to_datetime(check_df['start'], errors='coerce')
+    check_df['koniec'] = pd.to_datetime(check_df['koniec'], errors='coerce')
+    check_df = check_df.dropna(subset=['start', 'koniec'])
+    
+    for auto in check_df['pojazd'].unique():
+        v_df = check_df[check_df['pojazd'] == auto].sort_values('start')
+        if len(v_df) < 2: continue
+        
+        rows = v_df.to_dict('records')
+        for i in range(len(rows)):
+            for j in range(i + 1, len(rows)):
+                r1, r2 = rows[i], rows[j]
+                # Logika nachodzenia na siebie dat
+                if r1['start'] < r2['koniec'] and r2['start'] < r1['koniec']:
+                    conflicts.append({
+                        "auto": auto,
+                        "p1": r1['event'], "p2": r2['event'],
+                        "k1": r1['kierowca'], "k2": r2['kierowca'],
+                        "d1": f"{r1['start'].strftime('%d.%m')} - {r1['koniec'].strftime('%d.%m')}",
+                        "d2": f"{r2['start'].strftime('%d.%m')} - {r2['koniec'].strftime('%d.%m')}"
+                    })
+    return conflicts
+
+# -----------------------------------------------------------------------------
+# 5. SIDEBAR I KALENDARZ
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.header("NARZĘDZIA")
+    st.header("LOGISTYKA")
     today = datetime.now()
-    view_range = st.date_input("ZAKRES KALENDARZA:", value=(today - timedelta(days=2), today + timedelta(days=16)))
-    if st.button("🔄 POBIERZ ŚWIEŻE DANE"):
+    view_range = st.date_input("ZAKRES WIDOKU:", value=(today - timedelta(days=2), today + timedelta(days=16)))
+    if st.button("🔄 POBIERZ Z ARKUSZA"):
         st.session_state.main_df = get_data()
         st.rerun()
-    
     st.divider()
-    st.info("💡 Tip: Zapisuj co 15 minut, aby uniknąć utraty danych przy awarii przeglądarki.")
+    st.write("Wersja: 23.0 (Collision Guard)")
 
 start_v, end_v = view_range if isinstance(view_range, tuple) and len(view_range) == 2 else (today - timedelta(days=2), today + timedelta(days=16))
 
-# -----------------------------------------------------------------------------
-# 5. WYKRES GANTTA
-# -----------------------------------------------------------------------------
-def draw_precision_gantt(df_to_plot, assets_to_list, height=600):
+def draw_gantt(df_to_plot, assets_to_list, height=600):
     fig = go.Figure()
     fig.add_trace(go.Scatter(y=assets_to_list, x=[None]*len(assets_to_list), showlegend=False))
     
-    clean_plot = df_to_plot[df_to_plot['start'] != ""].copy()
-    if not clean_plot.empty:
-        clean_plot['y_label'] = clean_plot['pojazd'].apply(lambda x: f"{ASSET_TO_CAT_ICON.get(x, '•')} {x}")
-        for ev, group in clean_plot.groupby('event'):
+    plot_data = df_to_plot[df_to_plot['start'].notnull()].copy()
+    if not plot_data.empty:
+        plot_data['y_label'] = plot_data['pojazd'].apply(lambda x: f"{ASSET_TO_CAT_ICON.get(x, '•')} {x}")
+        for ev, group in plot_data.groupby('event'):
             dur = (group['koniec'] - group['start']).dt.total_seconds() * 1000
             fig.add_trace(go.Bar(
                 y=group['y_label'], x=dur, base=group['start'],
                 orientation='h', name=ev, text=group['event'],
                 textposition='inside', insidetextanchor='start',
                 textfont=dict(size=14, color='white'),
-                marker=dict(line=dict(width=1, color='rgba(255,255,255,0.3)')),
                 hovertemplate="<b>%{y}</b><br>%{text}<extra></extra>"
             ))
     
     fig.update_layout(
-        barmode='overlay', height=height, showlegend=False, template="plotly_white",
-        margin=dict(l=20, r=20, t=60, b=20),
-        xaxis=dict(type='date', range=[start_v, end_v], side='top', tickformat="%d\n%b", 
-                   tickfont=dict(size=15, weight='bold'), showgrid=True, gridcolor='#cbd5e1', dtick="D1"),
-        yaxis=dict(categoryorder='array', categoryarray=assets_to_list[::-1], automargin=True, 
-                   tickfont=dict(size=16, weight='bold'), showgrid=True, gridcolor='#f1f5f9')
+        height=height, template="plotly_white", margin=dict(l=20, r=20, t=60, b=20),
+        xaxis=dict(type='date', range=[start_v, end_v], side='top', tickformat="%d\n%b", dtick="D1", gridcolor='#e2e8f0'),
+        yaxis=dict(categoryorder='array', categoryarray=assets_to_list[::-1], automargin=True, gridcolor='#f1f5f9'),
+        showlegend=False
     )
-    fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
+    fig.add_vline(x=today.timestamp()*1000, line_width=3, line_color="red")
     return fig
 
 # -----------------------------------------------------------------------------
-# 6. MENU I WIDOKI
+# 6. OBSŁUGA ZAKŁADEK
 # -----------------------------------------------------------------------------
 tabs = list(RESOURCES.keys()) + ["🔧 EDYCJA I PLANOWANIE"]
-active_tab = st.radio("MENU:", tabs, horizontal=True)
+active_tab = st.radio("WYBIERZ WIDOK:", tabs, horizontal=True)
 st.divider()
 
 if active_tab in RESOURCES:
     group_assets = RESOURCES[active_tab]
     labels = [f"{active_tab[0]} {a}" for a in group_assets]
     df_f = st.session_state.main_df[st.session_state.main_df['pojazd'].isin(group_assets)]
-    st.plotly_chart(draw_precision_gantt(df_f, labels, height=len(labels)*65 + 100), use_container_width=True)
+    st.plotly_chart(draw_gantt(df_f, labels, height=len(labels)*65 + 100), use_container_width=True)
 
 else:
-    st.subheader("Panel Edycji i Bezpieczeństwa")
+    st.subheader("Panel Edycji z Kontrolą Dubli")
     
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        search_q = st.text_input("🔍 FILTRUJ ZASOBY (możesz edytować w filtrze):", "").lower()
-    with col2:
-        # EKSPORT DO EXCELA - KOPIA RATUNKOWA
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            st.session_state.main_df.to_excel(writer, index=False, sheet_name='Flota_SQM')
-        
-        st.download_button(
-            label="📥 POBIERZ KOPIĘ DO EXCELA (Zabezpiecz pracę)",
-            data=buffer,
-            file_name=f"SQM_LOGISTICS_BACKUP_{datetime.now().strftime('%H_%M')}.xlsx",
-            mime="application/vnd.ms-excel",
-            use_container_width=True
-        )
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        search_q = st.text_input("🔍 FILTRUJ POJAZDY (edytuj swobodnie):", "").lower()
+    with col_b:
+        # BACKUP CSV
+        csv = st.session_state.main_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 POBIERZ KOPIĘ (CSV)", data=csv, file_name=f"SQM_BACKUP_{datetime.now().strftime('%H%M')}.csv", use_container_width=True)
 
-    # Dane do wyświetlenia
+    # Przygotowanie danych do edycji
     if search_q:
         mask = st.session_state.main_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
         display_df = st.session_state.main_df[mask]
-        current_labels = [l for l in ALL_ASSETS_ORDERED if search_q in l.lower()]
     else:
         display_df = st.session_state.main_df
-        current_labels = ALL_ASSETS_ORDERED
 
-    with st.expander("📊 PODGLĄD GRAFICZNY", expanded=True):
-        st.plotly_chart(draw_precision_gantt(display_df, current_labels, height=len(current_labels)*55 + 150), use_container_width=True)
-
-    st.markdown("### ✏️ TABELA DANYCH")
-    
-    edited_part = st.data_editor(
+    # Edytor danych
+    edited_df = st.data_editor(
         display_df,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
-        height=600,
-        key="editor_v20",
+        height=500,
+        key="editor_final_v23",
         column_config={
-            "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=CLEAN_LIST, width=280, required=True),
-            "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
-            "start": st.column_config.DateColumn("📅 OD", width=120),
-            "koniec": st.column_config.DateColumn("🏁 DO", width=120),
-            "kierowca": st.column_config.TextColumn("👤 KIER.", width=120),
-            "notatka": st.column_config.TextColumn("📝 NOTATKI", width=400)
+            "pojazd": st.column_config.SelectboxColumn("🚛 POJAZD", options=CLEAN_LIST, required=True),
+            "start": st.column_config.DateColumn("📅 OD"),
+            "koniec": st.column_config.DateColumn("🏁 DO"),
         }
     )
 
-    # BEZPIECZNY ZAPIS
-    if st.button("💾 ZAPISZ ZMIANY W ARKUSZU GOOGLE", use_container_width=True, type="primary"):
-        try:
-            # Pobierz aktualny stan z Google, żeby nie usunąć tego, czego nie widzimy
-            full_current_db = get_data()
-            
-            # 1. Wycinamy z bazy te wiersze, które właśnie edytujemy
-            if search_q:
-                mask_to_keep = ~full_current_db.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
-                base_data = full_current_db[mask_to_keep]
-            else:
-                base_data = pd.DataFrame(columns=full_current_db.columns)
+    # --- ANALIZA KOLIZJI ---
+    # Musimy sprawdzić nową edycję na tle całej bazy (również tej ukrytej)
+    fresh_db = get_data()
+    if search_q:
+        mask_keep = ~fresh_db.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
+        static_data = fresh_db[mask_keep]
+    else:
+        static_data = pd.DataFrame(columns=fresh_db.columns)
+    
+    # Łączymy wszystko w jeden zbiór do testu kolizji
+    full_to_check = pd.concat([static_data, edited_df], ignore_index=True)
+    full_to_check = full_to_check[full_to_check['pojazd'] != ""]
+    
+    conflicts = get_collisions(full_to_check)
 
-            # 2. Dodajemy do nich to, co widać w tabeli (nową edycję)
-            final_df = pd.concat([base_data, edited_part], ignore_index=True)
-            
-            # 3. Czyszczenie
-            final_df = final_df[final_df['pojazd'] != ""].drop_duplicates()
-            
-            # 4. Formatowanie pod GSheets
-            final_df['start'] = pd.to_datetime(final_df['start']).dt.strftime('%Y-%m-%d')
-            final_df['koniec'] = pd.to_datetime(final_df['koniec']).dt.strftime('%Y-%m-%d')
-            final_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+    if conflicts:
+        st.markdown('<div class="conflict-box">', unsafe_allow_html=True)
+        st.error(f"⚠️ ZNALEZIONO {len(conflicts)} KOLIZJI!")
+        for c in conflicts:
+            st.write(f"❌ **{c['auto']}**: Projekt **{c['p1']}** ({c['d1']}) pokrywa się z **{c['p2']}** ({c['d2']})")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-            # 5. Blokada przed pustym zapisem
-            if final_df.empty and not full_current_db.empty:
-                st.error("Próba zapisu pustej tabeli! Operacja wstrzymana.")
-            else:
-                conn.update(data=final_df)
-                st.session_state.main_df = get_data()
-                st.success(f"Pomyślnie zapisano {len(final_df)} wpisów. Wszystkie dane (również te ukryte filtrem) są bezpieczne.")
-                st.balloons()
-                st.rerun()
-        except Exception as e:
-            st.error(f"Błąd krytyczny przy zapisie: {e}")
+    # --- ZAPIS ---
+    if st.button("💾 ZAPISZ WSZYSTKO W ARKUSZU GOOGLE", use_container_width=True, type="primary"):
+        # Przygotowanie do wysyłki
+        save_df = full_to_check.copy()
+        save_df['start'] = pd.to_datetime(save_df['start']).dt.strftime('%Y-%m-%d')
+        save_df['koniec'] = pd.to_datetime(save_df['koniec']).dt.strftime('%Y-%m-%d')
+        save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+        
+        conn.update(data=save_df)
+        st.session_state.main_df = get_data()
+        st.success("Dane zapisane pomyślnie. Kolizje zostały sprawdzone.")
+        st.rerun()
