@@ -5,31 +5,42 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. KONFIGURACJA I STYLE (BRAK SCROLLA, DUŻA CZCIONKA)
+# 1. KONFIGURACJA INTERFEJSU (BRAK SCROLLA, DUŻE CZCIONKI)
 # -----------------------------------------------------------------------------
-st.set_page_config(page_title="SQM LOGISTICS", layout="wide")
+st.set_page_config(
+    page_title="SQM LOGISTICS | Fleet Control",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@700;900&display=swap');
     .stApp { background-color: #f1f5f9; font-family: 'Inter', sans-serif; }
+    
     .sqm-header {
         background: #0f172a; padding: 2rem; border-radius: 15px; color: white;
         margin-bottom: 2rem; border-bottom: 10px solid #2563eb;
     }
+
+    /* POWIĘKSZENIE CZCIONEK DLA WYGODY PLANOWANIA */
     [data-testid="stDataEditor"] div { font-size: 18px !important; }
     button[data-baseweb="tab"] div p { font-size: 22px !important; font-weight: 900 !important; }
-    ::-webkit-scrollbar { width: 20px; height: 20px; }
-    ::-webkit-scrollbar-thumb { background: #2563eb; border-radius: 10px; border: 4px solid #f1f5f9; }
+
+    /* WIDOCZNE I GRUBE SUWAKI */
+    ::-webkit-scrollbar { width: 22px !important; height: 22px !important; }
+    ::-webkit-scrollbar-track { background: #cbd5e1 !important; }
+    ::-webkit-scrollbar-thumb { background: #2563eb !important; border-radius: 10px; border: 4px solid #cbd5e1 !important; }
     </style>
+    
     <div class="sqm-header">
-        <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8;">Permanent Asset Visibility v8.5</p>
+        <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">System Zarządzania Zasobami v8.6</p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. KOMPLETNA LISTA ZASOBÓW (TWOJA BAZA)
+# 2. DEFINICJA ZASOBÓW (TWOJA BAZA)
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": [
@@ -57,79 +68,111 @@ RESOURCES = {
 ALL_ASSETS = [item for sublist in RESOURCES.values() for item in sublist]
 
 # -----------------------------------------------------------------------------
-# 3. LOGIKA DANYCH (POŁĄCZENIE STAŁEJ LISTY Z ARKUSZEM)
+# 3. FILTR DAT - ZAKRES WIDOKU (SIDEBAR)
+# -----------------------------------------------------------------------------
+with st.sidebar:
+    st.header("⚙️ USTAWIENIA WIDOKU")
+    today = datetime.now()
+    
+    # TUTAJ ZMIENIASZ ZAKRES WIDOKU HARMONOGRAMU
+    view_range = st.date_input(
+        "Wybierz zakres dat:",
+        value=(today - timedelta(days=2), today + timedelta(days=21)),
+        help="Wybierz datę początkową i końcową, aby przybliżyć/oddalić wykres."
+    )
+    
+    st.divider()
+    st.info("Linia czerwona na wykresie to czas obecny.")
+
+# Logika obsługi zakresu (zabezpieczenie przed wyborem tylko jednej daty)
+if isinstance(view_range, tuple) and len(view_range) == 2:
+    start_v, end_v = view_range
+else:
+    start_v, end_v = today - timedelta(days=2), today + timedelta(days=21)
+
+# -----------------------------------------------------------------------------
+# 4. LOGIKA DANYCH (INTEGRACJA)
 # -----------------------------------------------------------------------------
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def get_integrated_data():
+def get_data():
     try:
         raw = conn.read(ttl="0s")
         raw.columns = [str(c).strip().lower() for c in raw.columns]
         raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
         raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
         
-        # Klucz do sukcesu: Tworzymy szkielet ze wszystkich zasobów
         skeleton = pd.DataFrame({'pojazd': ALL_ASSETS})
-        
-        # Łączymy (Outer Join), aby zachować puste auta I wszystkie projekty z arkusza
         merged = pd.merge(skeleton, raw, on='pojazd', how='outer')
-        
-        # Usuwamy ewentualne wiersze z arkusza, które nie pasują do naszej listy RESOURCES (opcjonalnie)
         merged = merged[merged['pojazd'].isin(ALL_ASSETS)]
-        
         return merged.fillna("")
     except:
         return pd.DataFrame({'pojazd': ALL_ASSETS, 'event': '', 'start': pd.NaT, 'koniec': pd.NaT, 'kierowca': '', 'notatka': ''})
 
-df = get_integrated_data()
+df = get_data()
 
 # -----------------------------------------------------------------------------
-# 4. HARMONOGRAMY I EDYCJA
+# 5. HARMONOGRAMY (GANTT)
 # -----------------------------------------------------------------------------
-today = datetime.now()
-tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 EDYCJA WSZYSTKICH ZASOBÓW"])
+tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 EDYCJA / ARKUSZ"])
 
 for i, (cat, assets) in enumerate(RESOURCES.items()):
     with tabs[i]:
-        # Wyświetlamy wykres tylko jeśli są jakiekolwiek daty
         plot_df = df[(df['pojazd'].isin(assets)) & (df['start'] != "")].copy()
+        
         if not plot_df.empty:
-            fig = px.timeline(plot_df, x_start="start", x_end="koniec", y="pojazd", color="event", text="event", 
-                             category_orders={"pojazd": assets}, template="plotly_white")
-            fig.update_xaxes(side="top", tickfont=dict(size=16, weight='bold'))
+            fig = px.timeline(
+                plot_df, x_start="start", x_end="koniec", y="pojazd",
+                color="event", text="event", 
+                category_orders={"pojazd": assets}, 
+                template="plotly_white",
+                color_discrete_sequence=px.colors.qualitative.Dark24
+            )
+            
+            # Zastosowanie wybranego zakresu widoku
+            fig.update_xaxes(
+                side="top", 
+                range=[start_v, end_v], 
+                tickformat="%d\n%b",
+                dtick=86400000.0,
+                tickfont=dict(size=16, weight='bold')
+            )
+            
             fig.update_yaxes(title="", tickfont=dict(size=16, weight='bold'))
-            fig.update_layout(height=max(400, len(assets)*55 + 100), showlegend=False)
+            fig.update_layout(height=max(400, len(assets)*55 + 100), showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
             fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
-            st.plotly_chart(fig, use_container_width=True)
+            
+            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            # Nawet jeśli nie ma wykresu, wypisujemy listę wolnych aut
-            st.success(f"Wszystkie pojazdy {cat} są obecnie WOLNE (Dostępne: {', '.join(assets)})")
+            st.info(f"Brak zaplanowanych projektów dla: {cat}")
 
+# -----------------------------------------------------------------------------
+# 6. EDYCJA
+# -----------------------------------------------------------------------------
 with tabs[-1]:
-    st.subheader("Główny Arkusz Zarządzania")
-    st.info("Poniżej widnieje każdy zasób SQM. Możesz edytować istniejące lub dodawać nowe wiersze na dole.")
+    st.subheader("Główny Panel Zarządzania Zasobami")
     
     edited_df = st.data_editor(
         df,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
-        height=900,
+        height=850,
         column_config={
             "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=ALL_ASSETS, width=300, required=True),
             "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
             "start": st.column_config.DateColumn("📅 START", width=130),
             "koniec": st.column_config.DateColumn("🏁 KONIEC", width=130),
             "kierowca": st.column_config.TextColumn("👤 KIER.", width=120),
-            "notatka": st.column_config.TextColumn("📝 NOTATKI / SLOTY", width=500)
+            "notatka": st.column_config.TextColumn("📝 NOTATKI / SLOTY / TRANSPORT", width=500)
         }
     )
 
-    if st.button("💾 ZAPISZ WSZYSTKO", use_container_width=True):
+    if st.button("💾 ZAPISZ WSZYSTKO DO ARKUSZA", use_container_width=True):
         save_df = edited_df[edited_df['event'] != ""].copy()
         save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
         save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
         save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
         conn.update(data=save_df)
-        st.success("Zapisano pomyślnie!")
+        st.success("Zapis zakończony!")
         st.rerun()
