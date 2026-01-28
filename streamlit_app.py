@@ -48,7 +48,7 @@ st.markdown("""
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v12.0 (Stable Full Code)</p>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v13.0 (Grid View & Stability)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -71,13 +71,11 @@ def get_data():
         raw.columns = [str(c).strip().lower() for c in raw.columns]
         raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
         raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
-        # Usuwamy puste wiersze, by nie zaśmiecać widoku
         raw = raw.dropna(subset=['pojazd'])
         return raw.fillna("")
     except:
         return pd.DataFrame(columns=['pojazd', 'event', 'start', 'koniec', 'kierowca', 'notatka'])
 
-# Główne dane ładowane do sesji (zapobiega resetom sortowania)
 if "main_df" not in st.session_state:
     st.session_state.main_df = get_data()
 
@@ -110,7 +108,7 @@ active_tab = st.radio("MENU:", tabs, horizontal=True)
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 6. WYKRES (Bulletproof Mode)
+# 6. WYKRES (Gantt z pionową siatką i "kratką")
 # -----------------------------------------------------------------------------
 if active_tab in RESOURCES:
     assets_to_show = RESOURCES[active_tab]
@@ -118,7 +116,8 @@ if active_tab in RESOURCES:
     plot_df = plot_df[plot_df['start'] != ""].copy()
     
     fig = go.Figure()
-    # Zapewnienie, że wszystkie auta z kategorii są na osi Y, nawet jak nie mają eventu
+    
+    # Dodanie wszystkich aut na oś Y (nawet tych bez zadań)
     fig.add_trace(go.Scatter(y=assets_to_show, x=[None]*len(assets_to_show), showlegend=False))
 
     if not plot_df.empty:
@@ -136,35 +135,42 @@ if active_tab in RESOURCES:
     fig.update_layout(
         barmode='overlay', height=max(500, len(assets_to_show)*60 + 100),
         showlegend=False, template="plotly_white", margin=dict(l=10, r=20, t=50, b=10),
-        xaxis=dict(type='date', range=[start_v, end_v], side='top', tickformat="%d\n%b", tickfont=dict(size=16, weight='bold')),
-        yaxis=dict(categoryorder='array', categoryarray=assets_to_show[::-1], tickfont=dict(size=14, weight='bold'))
+        xaxis=dict(
+            type='date', range=[start_v, end_v], side='top', 
+            tickformat="%d\n%b", tickfont=dict(size=14, weight='bold'),
+            showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1, # Pionowe linie
+            dtick="D1" # Linia co każdy 1 dzień
+        ),
+        yaxis=dict(
+            categoryorder='array', categoryarray=assets_to_show[::-1], 
+            tickfont=dict(size=14, weight='bold'),
+            showgrid=True, gridcolor='rgba(0,0,0,0.05)' # Poziome linie
+        )
     )
+    # Linia "DZIŚ"
     fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
+    
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # -----------------------------------------------------------------------------
-# 7. PANEL EDYCJI (Sortowanie i Wyszukiwarka)
+# 7. PANEL EDYCJI
 # -----------------------------------------------------------------------------
 else:
     st.subheader("Główny Panel Edycji")
-    
-    # Wyszukiwarka
     search_q = st.text_input("🔍 WYSZUKAJ (Pojazd, Projekt, Kierowca):", "").lower()
     
-    # Filtrowanie widoku
     display_df = st.session_state.main_df.copy()
     if search_q:
         mask = display_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
         display_df = display_df[mask]
 
-    # EDYTOR - klucz 'key' zapewnia stabilność sortowania
     edited_df = st.data_editor(
         display_df,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
         height=800,
-        key="editor_v12_stable",
+        key="editor_v13_stable",
         column_config={
             "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=ALL_ASSETS, width=300, required=True),
             "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
@@ -176,12 +182,10 @@ else:
     )
 
     if st.button("💾 ZAPISZ ZMIANY I WERYFIKUJ KOLIZJE", use_container_width=True):
-        # 1. Pobranie danych i konwersja
         valid_data = edited_df[edited_df['event'] != ""].copy()
         valid_data['start'] = pd.to_datetime(valid_data['start'])
         valid_data['koniec'] = pd.to_datetime(valid_data['koniec'])
         
-        # 2. Sprawdzanie kolizji
         conflicts = []
         for p in valid_data['pojazd'].unique():
             v_res = valid_data[valid_data['pojazd'] == p].sort_values('start')
@@ -193,7 +197,6 @@ else:
         if conflicts:
             for c in conflicts: st.error(c)
         else:
-            # 3. Zapis
             save_df = valid_data.copy()
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
             save_df['Start'] = save_df['Start'].dt.strftime('%Y-%m-%d')
