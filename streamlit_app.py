@@ -4,63 +4,26 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja i EKSTREMALNY KONTRAST dla suwaków
-st.set_page_config(page_title="SQM LOGISTICS | Fleet Center", layout="wide")
+# 1. Konfiguracja
+st.set_page_config(page_title="SQM LOGISTICS | Data Center", layout="wide")
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-
-    .stApp { background-color: #f1f5f9; font-family: 'Inter', sans-serif; }
-
-    /* --- GIGANTYCZNE I KOLOROWE SUWAKI (SCROLLBARS) --- */
-    /* Robimy je na tyle duże i jaskrawe, by nie mogły się zlać z tabelą */
-    ::-webkit-scrollbar {
-        width: 22px !important;
-        height: 22px !important;
-    }
-    ::-webkit-scrollbar-track {
-        background: #1e293b !important; /* Bardzo ciemny tor */
-    }
-    ::-webkit-scrollbar-thumb {
-        background: #f97316 !important; /* Jaskrawy pomarańczowy suwak */
-        border-radius: 4px !important;
-        border: 4px solid #1e293b !important;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-        background: #fb923c !important;
-    }
-
-    /* Stylizacja nagłówka i kontenerów */
-    .header-bar {
-        background: #0f172a;
-        padding: 1.5rem;
-        border-radius: 12px;
+    .stApp { background-color: #f8fafc; font-family: 'Inter', sans-serif; }
+    .header-box {
+        background-color: #0f172a;
+        padding: 1rem;
+        border-radius: 8px;
         color: white;
-        margin-bottom: 2rem;
-        border-bottom: 5px solid #f97316;
+        margin-bottom: 20px;
     }
-    
-    .stPlotlyChart {
-        background-color: white !important;
-        border: 1px solid #cbd5e1 !important;
-        border-radius: 12px !important;
-    }
-
-    /* Instrukcja sterowania */
-    .nav-hint {
-        background-color: #ffedd5;
-        border-left: 5px solid #f97316;
-        padding: 10px;
-        margin-bottom: 15px;
-        color: #9a3412;
-        font-weight: 600;
-        font-size: 0.9rem;
+    /* Podświetlenie edytora */
+    [data-testid="stDataEditor"] {
+        border: 2px solid #2563eb !important;
     }
     </style>
-
-    <div class="header-bar">
-        <h1 style="margin:0;">SQM LOGISTICS <span style="font-weight:300;">| Fleet Control</span></h1>
+    <div class="header-box">
+        <h1 style="margin:0; font-size: 1.5rem;">SQM LOGISTICS | System Zarządzania Flotą</h1>
     </div>
     """, unsafe_allow_html=True)
 
@@ -105,61 +68,66 @@ def get_data():
 
 df = get_data()
 
-# 4. SIDEBAR - Sterowanie datą (Zamiast scrolla poziomego na wykresie)
-with st.sidebar:
-    st.header("⚙️ Widok Czasowy")
-    today = datetime.now()
-    date_range = st.date_input(
-        "Wybierz okno czasowe:",
-        value=(today - timedelta(days=2), today + timedelta(days=21)),
-        key="global_date_range"
-    )
+# 4. MODUŁ WIDOKU (GANTT)
+tabs = st.tabs(["📊 WIDOK OPERACYJNY", "✏️ EDYCJA DANYCH"])
 
-# Wyznaczanie zakresu
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    s_view, e_view = date_range
-else:
-    s_view, e_view = today - timedelta(days=2), today + timedelta(days=21)
+with tabs[0]:
+    # Nawigator dat na górze
+    col_a, col_b = st.columns(2)
+    with col_a:
+        start_v = st.date_input("Od:", datetime.now() - timedelta(days=2))
+    with col_b:
+        end_v = st.date_input("Do:", datetime.now() + timedelta(days=21))
 
-# 5. MODUŁ OPERACYJNY
-tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 EDYCJA BAZY"])
-
-for i, category in enumerate(RESOURCES.keys()):
-    with tabs[i]:
-        cat_df = df[df['pojazd'].isin(RESOURCES[category])].copy()
+    for category, assets in RESOURCES.items():
+        st.subheader(category)
+        cat_df = df[df['pojazd'].isin(assets)].copy()
         if not cat_df.empty:
             fig = px.timeline(cat_df, x_start="start", x_end="koniec", y="pojazd", color="event", template="plotly_white")
-            fig.update_xaxes(side="top", range=[s_view, e_view], tickformat="%d\n%b", dtick=86400000.0)
-            fig.update_layout(height=len(RESOURCES[category])*50 + 100, showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
+            fig.update_xaxes(side="top", range=[start_v, end_v], tickformat="%d\n%b")
+            fig.update_layout(height=len(assets)*45 + 100, showlegend=False, margin=dict(l=0, r=0, t=40, b=0))
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Brak zadań w wybranym zakresie.")
 
-# 6. ZARZĄDZANIE - Sterowanie klawiaturą
-with tabs[-1]:
-    st.markdown('<div class="nav-hint">⌨️ NAWIGACJA: Kliknij w komórkę i używaj STRZAŁEK, aby się poruszać. Użyj TAB, aby przejść do kolejnej kolumny (np. Notatki).</div>', unsafe_allow_html=True)
+# 5. MODUŁ EDYCJI (BEZ SCROLLA - FILTROWANIE)
+with tabs[1]:
+    st.info("🔍 Wybierz pojazd z listy, aby go edytować. Dzięki temu tabela będzie krótka i czytelna.")
     
+    selected_asset = st.selectbox("Wybierz zasób do edycji/dodania wpisu:", ["WSZYSTKIE"] + ALL_RESOURCES)
+    
+    # Filtrujemy dane do edycji
+    if selected_asset == "WSZYSTKIE":
+        df_to_edit = df.copy()
+    else:
+        df_to_edit = df[df['pojazd'] == selected_asset].copy()
+
     edited_df = st.data_editor(
-        df, 
-        num_rows="dynamic", 
+        df_to_edit,
+        num_rows="dynamic",
         use_container_width=True,
-        height=550,
         column_config={
-            "pojazd": st.column_config.SelectboxColumn("🚛 Pojazd", options=ALL_RESOURCES, width="large"),
-            "event": st.column_config.TextColumn("📋 Event", width="medium"),
-            "start": st.column_config.DateColumn("📅 Start", width="small"),
-            "koniec": st.column_config.DateColumn("🏁 Koniec", width="small"),
-            "kierowca": st.column_config.TextColumn("👤 Kierowca", width="medium"),
-            "notatka": st.column_config.TextColumn("📝 Notatki", width="large")
+            "pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_RESOURCES, width="medium"),
+            "event": st.column_config.TextColumn("Event", width="medium"),
+            "start": st.column_config.DateColumn("Start", width="small"),
+            "koniec": st.column_config.DateColumn("Koniec", width="small"),
+            "kierowca": st.column_config.TextColumn("Kierowca", width="medium"),
+            "notatka": st.column_config.TextColumn("Notatka", width="large")
         },
-        key="keyboard_editor_v6"
+        key="filtered_editor"
     )
-    
-    if st.button("ZAPISZ ZMIANY W ARKUSZU"):
-        with st.status("Synchronizacja..."):
-            save_df = edited_df.copy()
-            save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-            save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
-            save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
-            conn.update(data=save_df)
+
+    if st.button("ZAPISZ ZMIANY"):
+        with st.status("Zapisywanie..."):
+            # Jeśli edytowaliśmy tylko jeden pojazd, musimy połączyć to z resztą bazy
+            if selected_asset != "WSZYSTKIE":
+                # Usuwamy stare wpisy dla tego pojazdu i dodajemy nowe
+                other_assets_df = df[df['pojazd'] != selected_asset]
+                final_df = pd.concat([other_assets_df, edited_df])
+            else:
+                final_df = edited_df
+
+            # Przygotowanie do zapisu
+            final_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+            final_df['Start'] = pd.to_datetime(final_df['Start']).dt.strftime('%Y-%m-%d')
+            final_df['Koniec'] = pd.to_datetime(final_df['Koniec']).dt.strftime('%Y-%m-%d')
+            conn.update(data=final_df)
             st.rerun()
