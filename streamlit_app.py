@@ -1,11 +1,11 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import plotly.graph_objects as go
+import plotly.express as px
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. LOGOWANIE
+# 1. SYSTEM LOGOWANIA
 # -----------------------------------------------------------------------------
 def check_password():
     def password_entered():
@@ -29,7 +29,7 @@ if not check_password():
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 2. STYLE CSS
+# 2. KONFIGURACJA I STYLE CSS
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="SQM LOGISTICS", layout="wide", initial_sidebar_state="expanded")
 
@@ -49,12 +49,12 @@ st.markdown("""
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.4 (Bulletproof Text Mode)</p>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.5 (Outside Labels Fix)</p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. ZASOBY
+# 3. PEŁNA LISTA ZASOBÓW
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": ["31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS", "TIR 3- PNT3530A/PZ4U343 DANIELAK", "44 - SOLO PY 73262", "45 - PY1541M + przyczepa", "SPEDYCJA", "AUTO RENTAL"],
@@ -108,7 +108,7 @@ st.session_state["active_tab_index"] = tab_titles.index(active_tab)
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 6. GENEROWANIE WYKRESU (METODA GO.BAR - NAJBARDZIEJ STABILNA)
+# 6. WYKRES (FIX: NAPISY NA ZEWNĄTRZ)
 # -----------------------------------------------------------------------------
 if active_tab in RESOURCES:
     assets_to_show = RESOURCES[active_tab]
@@ -116,47 +116,33 @@ if active_tab in RESOURCES:
     plot_df = plot_df[plot_df['start'] != ""].copy()
     
     if not plot_df.empty:
-        fig = go.Figure()
-
-        # Ręcznie dodajemy każdy projekt jako pasek, aby wymusić tekst
-        for event_name, group in plot_df.groupby('event'):
-            # Obliczamy czas trwania (width) dla go.Bar
-            widths = (group['koniec'] - group['start']).dt.total_seconds() * 1000
-            
-            fig.add_trace(go.Bar(
-                y=group['pojazd'],
-                x=widths,
-                base=group['start'],
-                orientation='h',
-                name=event_name,
-                text=group['event'],
-                textposition='inside',
-                insidetextanchor='start',
-                textfont=dict(size=14, color='white', family="Inter"),
-                constraintext='none', # WYMUSZA brak znikania tekstu
-                hovertemplate="<b>%{y}</b><br>Projekt: %{text}<br>Start: %{base|%d %b}<extra></extra>"
-            ))
-
-        fig.update_layout(
-            barmode='overlay',
-            height=max(500, len(assets_to_show)*60 + 100),
-            showlegend=False,
+        fig = px.timeline(
+            plot_df, x_start="start", x_end="koniec", y="pojazd",
+            color="event",
+            text="event",
+            category_orders={"pojazd": assets_to_show}, 
             template="plotly_white",
-            margin=dict(l=10, r=20, t=50, b=10),
-            xaxis=dict(
-                type='date',
-                range=[start_v, end_v],
-                side='top',
-                tickformat="%d\n%b",
-                tickfont=dict(size=16, weight='bold')
-            ),
-            yaxis=dict(
-                categoryorder='array',
-                categoryarray=assets_to_show[::-1], # Odwrócenie kolejności by pasowało do listy
-                tickfont=dict(size=14, weight='bold')
-            )
+            color_discrete_sequence=px.colors.qualitative.Prism
         )
         
+        # KLUCZOWA ZMIANA: textposition="outside"
+        # To sprawia, że przy długich eventach napis "wystaje" z paska i jest zawsze widoczny
+        fig.update_traces(
+            textposition="outside",
+            textfont=dict(size=14, color="black", family="Inter"),
+            cliponaxis=False 
+        )
+        
+        fig.update_layout(
+            height=max(500, len(assets_to_show)*60 + 100), 
+            showlegend=False, 
+            # Zwiększony prawy margines (r=250), aby napisy outside nie były ucięte
+            margin=dict(l=10, r=250, t=50, b=10),
+            bargap=0.5
+        )
+        
+        fig.update_xaxes(side="top", range=[start_v, end_v], tickformat="%d\n%b", tickfont=dict(size=16, weight='bold'))
+        fig.update_yaxes(title="", tickfont=dict(size=14, weight='bold'), autorange="reversed")
         fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
         
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
@@ -164,7 +150,7 @@ if active_tab in RESOURCES:
         st.info(f"Brak projektów dla: {active_tab}")
 
 # -----------------------------------------------------------------------------
-# 7. EDYCJA
+# 7. PANEL EDYCJI
 # -----------------------------------------------------------------------------
 elif active_tab == "🔧 EDYCJA / ARKUSZ":
     st.subheader("Główny Panel Edycji")
