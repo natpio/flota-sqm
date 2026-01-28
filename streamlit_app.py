@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. KONFIGURACJA INTERFEJSU - WYSOKI KONTRAST I DUŻA CZCIONKA
+# 1. KONFIGURACJA ŚRODOWISKA I INTERFEJSU (WYSOKA CZYTELNOŚĆ)
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="SQM LOGISTICS | Enterprise Fleet Manager",
@@ -13,14 +13,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Wstrzyknięcie stylów CSS dla czytelności logistycznej
+# Wstrzyknięcie pełnych stylów CSS dla czytelności i eliminacji scrolla
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@700;900&display=swap');
     
+    /* Globalne ustawienia bazy */
     .stApp { background-color: #f1f5f9; font-family: 'Inter', sans-serif; }
     
-    /* Nagłówek SQM Logistics Professional */
+    /* Profesjonalny Header SQM */
     .sqm-header {
         background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%);
         padding: 2.5rem;
@@ -31,32 +32,30 @@ st.markdown("""
         box-shadow: 0 10px 15px -3px rgba(0,0,0,0.2);
     }
 
-    /* POWIĘKSZENIE CZCIONEK DLA WYGODY PLANOWANIA */
+    /* WIELKIE CZCIONKI DO TABELI I TABÓW */
     [data-testid="stDataEditor"] div { font-size: 18px !important; }
     button[data-baseweb="tab"] div p { font-size: 24px !important; font-weight: 900 !important; color: #0f172a !important; }
 
-    /* WIDOCZNE I KOLOROWE SUWAKI (SCROLLBARS) */
+    /* WIDOCZNE I GRUBE SUWAKI DLA SZYBKIEJ NAWIGACJI */
     ::-webkit-scrollbar { width: 22px !important; height: 22px !important; display: block !important; }
     ::-webkit-scrollbar-track { background: #cbd5e1 !important; }
     ::-webkit-scrollbar-thumb { background: #2563eb !important; border-radius: 10px !important; border: 4px solid #cbd5e1 !important; }
     ::-webkit-scrollbar-thumb:hover { background: #1e40af !important; }
 
-    /* Ukrycie menu Streamlit dla profesjonalnego wyglądu */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    /* Usuwanie zbędnych marginesów Streamlit */
+    .block-container { padding-top: 1.5rem; }
     </style>
 
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 4rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
         <p style="margin:0; opacity:0.8; font-size: 1.4rem; font-weight: 400; margin-top: 10px;">
-            Full Fleet Deployment & Asset Management System v8.0
+            Full Asset Deployment & Multi-Event Management System v8.1
         </p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. DEFINICJA ZASOBÓW (PEŁNY SPIS ZGODNIE Z DOKUMENTACJĄ)
+# 2. DEFINICJA WSZYSTKICH ZASOBÓW (GWARANTOWANA KOMPLETNOŚĆ)
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": [
@@ -102,51 +101,50 @@ RESOURCES = {
     ]
 }
 
-# Spłaszczona lista do Selectboxów i sprawdzania spójności
+# Spłaszczona lista wszystkich zasobów do selekcji w edytorze
 ALL_ASSETS_LIST = sorted([item for sublist in RESOURCES.values() for item in sublist])
 
 # -----------------------------------------------------------------------------
-# 3. OBSŁUGA DANYCH (GOOGLE SHEETS)
+# 3. ŁĄCZNOŚĆ Z DANYMI (GOOGLE SHEETS)
 # -----------------------------------------------------------------------------
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
     try:
-        # Odczyt danych z arkusza w czasie rzeczywistym
+        # Odczyt bezpośredni bez cache'owania (ttl=0s)
         raw_df = conn.read(ttl="0s")
-        # Standaryzacja nazw kolumn na małe litery
+        # Standaryzacja nazw kolumn
         raw_df.columns = [str(c).strip().lower() for c in raw_df.columns]
-        # Konwersja na typy daty
+        # Konwersja dat
         raw_df['start'] = pd.to_datetime(raw_df['start'], errors='coerce')
         raw_df['koniec'] = pd.to_datetime(raw_df['koniec'], errors='coerce')
         
-        # Jeśli arkusz jest zupełnie pusty, przygotuj strukturę
         if raw_df.empty:
             return pd.DataFrame(columns=["pojazd", "event", "start", "koniec", "kierowca", "notatka"])
         
         return raw_df.fillna("")
-    except Exception as e:
-        # W przypadku błędu (np. brak kolumn) zwróć pusty szablon
+    except Exception:
+        # Zwróć pusty szablon, jeśli arkusz nie odpowiada
         return pd.DataFrame(columns=["pojazd", "event", "start", "koniec", "kierowca", "notatka"])
 
-# Inicjalizacja danych
-df_current = load_data()
+# Inicjalizacja danych bieżących
+df_main = load_data()
 
 # -----------------------------------------------------------------------------
-# 4. KONFIGURACJA WIDOKU HARMONOGRAMU
+# 4. MODUŁ WIZUALIZACJI (HARMONOGRAMY GANTTA)
 # -----------------------------------------------------------------------------
+# Zakres czasowy widoku
 today = datetime.now()
-v_start = today - timedelta(days=3)
-v_end = today + timedelta(days=24)
+view_start = today - timedelta(days=2)
+view_end = today + timedelta(days=21)
 
-tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 ZARZĄDZANIE I DOPISYWANIE"])
+tabs = st.tabs(list(RESOURCES.keys()) + ["📝 EDYCJA I NOWE EVENTY"])
 
-# Renderowanie wykresów dla każdej kategorii
 for i, (category, assets) in enumerate(RESOURCES.items()):
     with tabs[i]:
-        # Filtrujemy tylko wiersze, które mają datę startu i są w danej kategorii
-        mask = (df_current['pojazd'].isin(assets)) & (df_current['start'].notnull())
-        plot_df = df_current[mask].copy()
+        # Filtrujemy dane dla konkretnej grupy zasobów
+        mask = (df_main['pojazd'].isin(assets)) & (df_main['start'].notnull())
+        plot_df = df_main[mask].copy()
         
         if not plot_df.empty:
             fig = px.timeline(
@@ -158,71 +156,64 @@ for i, (category, assets) in enumerate(RESOURCES.items()):
                 text="event",
                 category_orders={"pojazd": assets},
                 template="plotly_white",
-                color_discrete_sequence=px.colors.qualitative.Dark24
+                color_discrete_sequence=px.colors.qualitative.Prism
             )
             
-            # Stylizacja osi X (Daty na górze)
+            # Konfiguracja osi X i Y pod kątem czytelności logistycznej
             fig.update_xaxes(
                 side="top", 
-                range=[v_start, v_end], 
+                range=[view_start, view_end], 
                 tickformat="%d\n%b",
                 dtick=86400000.0,
                 tickfont=dict(size=16, weight='bold', color="#0f172a"),
                 gridcolor="#e2e8f0"
             )
             
-            # Stylizacja osi Y (Pojazdy)
             fig.update_yaxes(
                 title="", 
                 tickfont=dict(size=16, weight='bold', color="#0f172a"),
                 gridcolor="#f1f5f9"
             )
             
-            # Stylizacja pasków eventów
             fig.update_traces(
                 textfont_size=14, 
-                textfont_color="white",
                 textposition="inside",
-                insidetextanchor="middle",
-                marker_line_width=1,
-                marker_line_color="white"
+                insidetextanchor="middle"
             )
             
             fig.update_layout(
-                height=max(350, len(assets)*55 + 120),
+                height=max(300, len(assets)*55 + 100),
                 margin=dict(l=10, r=10, t=60, b=10),
                 showlegend=False,
-                bargap=0.3
+                bargap=0.35
             )
             
-            # Linia "DZISIAJ"
-            fig.add_vline(x=today.timestamp()*1000, line_width=5, line_color="#ef4444")
+            # Pionowa linia "DZISIAJ"
+            fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
             
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
-            st.info(f"Kategoria {category} nie ma obecnie przypisanych żadnych zadań.")
+            st.info(f"Brak zaplanowanych zadań w kategorii: {category}")
 
 # -----------------------------------------------------------------------------
-# 5. PANEL CENTRALNY - EDYCJA, DODAWANIE EVENTÓW I ZAPIS
+# 5. MODUŁ ZARZĄDZANIA (PEŁNY EDYTOR DANYCH)
 # -----------------------------------------------------------------------------
 with tabs[-1]:
-    st.markdown("### 📝 Arkusz Operacyjny Floty")
+    st.markdown("### 📋 Panel Planowania Przejazdów i Noclegów")
     st.markdown("""
-        **Instrukcja:**
-        1. Aby dodać kolejny projekt dla tego samego pojazdu, zjedź na sam dół i wybierz go w nowym wierszu.
-        2. Po zakończeniu edycji kliknij duży przycisk **ZAPISZ** na dole strony.
+    💡 **Wskazówka:** Aby przypisać kolejny projekt do tego samego pojazdu, po prostu dodaj nowy wiersz na dole tabeli i wybierz pojazd z listy.
     """)
 
-    # Główny edytor danych z dynamicznymi wierszami
+    # Edytor z obsługą dynamicznych wierszy i sztywną szerokością kolumn
     edited_df = st.data_editor(
-        df_current,
-        num_rows="dynamic",  # POZWALA NA DODAWANIE KOLEJNYCH EVENTÓW
+        df_main,
+        num_rows="dynamic",  # Pozwala na dopisywanie wielu projektów do jednego auta
         use_container_width=True,
         hide_index=True,
-        height=900,
+        height=850,
         column_config={
             "pojazd": st.column_config.SelectboxColumn(
-                "🚛 POJAZD / ZASÓB", 
+                "🚛 ZASÓB SQM", 
                 options=ALL_ASSETS_LIST, 
                 width="medium", 
                 required=True
@@ -231,36 +222,35 @@ with tabs[-1]:
             "start": st.column_config.DateColumn("📅 START", width="small"),
             "koniec": st.column_config.DateColumn("🏁 KONIEC", width="small"),
             "kierowca": st.column_config.TextColumn("👤 KIEROWCA", width="small"),
-            "notatka": st.column_config.TextColumn("📝 LOGISTYKA / SLOTY / UWAGI", width="large")
+            "notatka": st.column_config.TextColumn("📝 UWAGI / SLOTY / TRANSPORT", width="large")
         },
-        key="sqm_master_v8"
+        key="sqm_ultimate_v81"
     )
 
     st.markdown("---")
     
-    # Przycisk zapisu
-    if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY W CHMURZE", use_container_width=True):
-        with st.status("Trwa synchronizacja z Google Sheets..."):
+    # Przycisk zapisu z logiką czyszczenia danych
+    if st.button("💾 ZAPISZ HARMONOGRAM W ARKUSZU GOOGLE", use_container_width=True):
+        with st.status("Trwa aktualizacja bazy danych..."):
             try:
-                # Oczyszczanie danych przed zapisem
-                save_df = edited_df.dropna(subset=['pojazd']).copy()
-                # Usuń całkowicie puste wiersze
-                save_df = save_df[save_df['event'].astype(str).str.strip() != ""]
+                # Filtracja: usuwamy wiersze bez wybranego pojazdu lub bez nazwy eventu
+                to_save = edited_df.dropna(subset=['pojazd']).copy()
+                to_save = to_save[to_save['event'].astype(str).str.strip() != ""]
                 
-                # Formatowanie kolumn pod strukturę arkusza
-                save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+                # Zmiana nazw kolumn na format arkusza
+                to_save.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
                 
-                # Konwersja dat do formatu tekstowego akceptowanego przez Sheets
-                save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
-                save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
+                # Konwersja dat na format ISO dla Google Sheets
+                to_save['Start'] = pd.to_datetime(to_save['Start']).dt.strftime('%Y-%m-%d')
+                to_save['Koniec'] = pd.to_datetime(to_save['Koniec']).dt.strftime('%Y-%m-%d')
                 
-                # Aktualizacja
-                conn.update(data=save_df)
-                st.success("DANE ZAPISANE POMYŚLNIE!")
+                # Wysłanie danych do arkusza
+                conn.update(data=to_save)
+                st.success("Synchronizacja zakończona pomyślnie!")
                 st.rerun()
             except Exception as e:
-                st.error(f"Wystąpił błąd podczas zapisu: {e}")
+                st.error(f"Błąd podczas zapisu: {e}")
 
 # -----------------------------------------------------------------------------
-# KONIEC KOMPLETNEGO KODU v8.0
+# KONIEC KOMPLETNEGO KODU v8.1
 # -----------------------------------------------------------------------------
