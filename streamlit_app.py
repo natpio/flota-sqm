@@ -5,7 +5,36 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. KONFIGURACJA INTERFEJSU (BRAK SCROLLA, DUŻE CZCIONKI)
+# 1. SYSTEM LOGOWANIA (ZABEZPIECZENIE)
+# -----------------------------------------------------------------------------
+def check_password():
+    """Zwraca True, jeśli użytkownik podał poprawne hasło."""
+    def password_entered():
+        if st.session_state["password"] == "KOMORNIKISQM": 
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Usuwamy hasło z sesji dla bezpieczeństwa
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # Wyświetl formularz logowania
+        st.markdown("<h2 style='text-align: center;'>SQM LOGISTICS | LOGOWANIE</h2>", unsafe_allow_html=True)
+        st.text_input("Hasło dostępu:", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Błędne hasło
+        st.text_input("Hasło dostępu:", type="password", on_change=password_entered, key="password")
+        st.error("❌ Błędne hasło. Spróbuj ponownie.")
+        return False
+    else:
+        # Hasło poprawne
+        return True
+
+if not check_password():
+    st.stop()  # Wstrzymaj wykonywanie reszty kodu, jeśli nie zalogowano
+
+# -----------------------------------------------------------------------------
+# 2. KONFIGURACJA INTERFEJSU (BRAK SCROLLA, DUŻE CZCIONKI)
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="SQM LOGISTICS | Fleet Control",
@@ -23,24 +52,22 @@ st.markdown("""
         margin-bottom: 2rem; border-bottom: 10px solid #2563eb;
     }
 
-    /* POWIĘKSZENIE CZCIONEK DLA WYGODY PLANOWANIA */
     [data-testid="stDataEditor"] div { font-size: 18px !important; }
     button[data-baseweb="tab"] div p { font-size: 22px !important; font-weight: 900 !important; }
 
-    /* WIDOCZNE I GRUBE SUWAKI */
     ::-webkit-scrollbar { width: 22px !important; height: 22px !important; }
     ::-webkit-scrollbar-track { background: #cbd5e1 !important; }
     ::-webkit-scrollbar-thumb { background: #2563eb !important; border-radius: 10px; border: 4px solid #cbd5e1 !important; }
     </style>
     
     <div class="sqm-header">
-        <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM FLOTA</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">System Zarządzania Zasobami</p>
+        <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">System Zarządzania Zasobami v8.7</p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 2. DEFINICJA ZASOBÓW (TWOJA BAZA)
+# 3. DEFINICJA ZASOBÓW (TWOJA BAZA)
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": [
@@ -68,30 +95,28 @@ RESOURCES = {
 ALL_ASSETS = [item for sublist in RESOURCES.values() for item in sublist]
 
 # -----------------------------------------------------------------------------
-# 3. FILTR DAT - ZAKRES WIDOKU (SIDEBAR)
+# 4. FILTR DAT - ZAKRES WIDOKU (SIDEBAR)
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ USTAWIENIA WIDOKU")
     today = datetime.now()
     
-    # TUTAJ ZMIENIASZ ZAKRES WIDOKU HARMONOGRAMU
     view_range = st.date_input(
         "Wybierz zakres dat:",
-        value=(today - timedelta(days=2), today + timedelta(days=21)),
-        help="Wybierz datę początkową i końcową, aby przybliżyć/oddalić wykres."
+        value=(today - timedelta(days=2), today + timedelta(days=21))
     )
     
-    st.divider()
-    st.info("Linia czerwona na wykresie to czas obecny.")
+    if st.button("WYLOGUJ"):
+        st.session_state["password_correct"] = False
+        st.rerun()
 
-# Logika obsługi zakresu (zabezpieczenie przed wyborem tylko jednej daty)
 if isinstance(view_range, tuple) and len(view_range) == 2:
     start_v, end_v = view_range
 else:
     start_v, end_v = today - timedelta(days=2), today + timedelta(days=21)
 
 # -----------------------------------------------------------------------------
-# 4. LOGIKA DANYCH (INTEGRACJA)
+# 5. LOGIKA DANYCH (INTEGRACJA)
 # -----------------------------------------------------------------------------
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -112,7 +137,7 @@ def get_data():
 df = get_data()
 
 # -----------------------------------------------------------------------------
-# 5. HARMONOGRAMY (GANTT)
+# 6. HARMONOGRAMY (GANTT)
 # -----------------------------------------------------------------------------
 tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 EDYCJA / ARKUSZ"])
 
@@ -128,26 +153,16 @@ for i, (cat, assets) in enumerate(RESOURCES.items()):
                 template="plotly_white",
                 color_discrete_sequence=px.colors.qualitative.Dark24
             )
-            
-            # Zastosowanie wybranego zakresu widoku
-            fig.update_xaxes(
-                side="top", 
-                range=[start_v, end_v], 
-                tickformat="%d\n%b",
-                dtick=86400000.0,
-                tickfont=dict(size=16, weight='bold')
-            )
-            
+            fig.update_xaxes(side="top", range=[start_v, end_v], tickformat="%d\n%b", tickfont=dict(size=16, weight='bold'))
             fig.update_yaxes(title="", tickfont=dict(size=16, weight='bold'))
             fig.update_layout(height=max(400, len(assets)*55 + 100), showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
             fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
-            
             st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
         else:
             st.info(f"Brak zaplanowanych projektów dla: {cat}")
 
 # -----------------------------------------------------------------------------
-# 6. EDYCJA
+# 7. EDYCJA
 # -----------------------------------------------------------------------------
 with tabs[-1]:
     st.subheader("Główny Panel Zarządzania Zasobami")
