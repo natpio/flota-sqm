@@ -4,26 +4,36 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
 
-# 1. Konfiguracja
-st.set_page_config(page_title="SQM LOGISTICS | Data Center", layout="wide")
+# 1. Konfiguracja i Stylizacja Ultra-Kompaktowa
+st.set_page_config(page_title="SQM LOGISTICS | Full Fleet", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #f8fafc; font-family: 'Inter', sans-serif; }
-    .header-box {
-        background-color: #0f172a;
-        padding: 1rem;
-        border-radius: 8px;
-        color: white;
-        margin-bottom: 20px;
-    }
-    /* Podświetlenie edytora */
+    /* Globalne zagęszczenie interfejsu */
+    .block-container { padding-top: 1rem; padding-bottom: 0rem; }
+    
+    /* Wymuszenie kontrastu tabeli */
     [data-testid="stDataEditor"] {
-        border: 2px solid #2563eb !important;
+        border: 1px solid #0f172a !important;
+        background-color: #ffffff !important;
+    }
+
+    /* Nagłówek SQM */
+    .sqm-header {
+        background-color: #0f172a;
+        color: white;
+        padding: 10px 20px;
+        border-radius: 5px;
+        margin-bottom: 15px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
     </style>
-    <div class="header-box">
-        <h1 style="margin:0; font-size: 1.5rem;">SQM LOGISTICS | System Zarządzania Flotą</h1>
+    
+    <div class="sqm-header">
+        <div style="font-size: 1.5rem; font-weight: 900;">SQM LOGISTICS | FLOTA</div>
+        <div style="font-size: 0.8rem; opacity: 0.7;">Status: LIVE (Wszystkie Pojazdy)</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -53,7 +63,7 @@ RESOURCES = {
 }
 ALL_RESOURCES = [item for sublist in RESOURCES.values() for item in sublist]
 
-# 3. DANE
+# 3. POBIERANIE DANYCH
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
@@ -68,66 +78,52 @@ def get_data():
 
 df = get_data()
 
-# 4. MODUŁ WIDOKU (GANTT)
-tabs = st.tabs(["📊 WIDOK OPERACYJNY", "✏️ EDYCJA DANYCH"])
+# 4. UKŁAD STRONY
+tab_gantt, tab_edit = st.tabs(["📊 HARMONOGRAM FLOTY", "📝 EDYCJA CAŁEJ BAZY"])
 
-with tabs[0]:
-    # Nawigator dat na górze
-    col_a, col_b = st.columns(2)
-    with col_a:
-        start_v = st.date_input("Od:", datetime.now() - timedelta(days=2))
-    with col_b:
-        end_v = st.date_input("Do:", datetime.now() + timedelta(days=21))
-
-    for category, assets in RESOURCES.items():
-        st.subheader(category)
-        cat_df = df[df['pojazd'].isin(assets)].copy()
-        if not cat_df.empty:
-            fig = px.timeline(cat_df, x_start="start", x_end="koniec", y="pojazd", color="event", template="plotly_white")
-            fig.update_xaxes(side="top", range=[start_v, end_v], tickformat="%d\n%b")
-            fig.update_layout(height=len(assets)*45 + 100, showlegend=False, margin=dict(l=0, r=0, t=40, b=0))
+with tab_gantt:
+    # Kompaktowy wybór daty
+    c1, c2, c3 = st.columns([1,1,2])
+    with c1:
+        s_date = st.date_input("Widok od:", datetime.now() - timedelta(days=2))
+    with c2:
+        e_date = st.date_input("Widok do:", datetime.now() + timedelta(days=21))
+    
+    for cat, assets in RESOURCES.items():
+        st.markdown(f"**{cat}**")
+        c_df = df[df['pojazd'].isin(assets)].copy()
+        if not c_df.empty:
+            fig = px.timeline(c_df, x_start="start", x_end="koniec", y="pojazd", color="event", template="plotly_white")
+            fig.update_xaxes(side="top", range=[s_date, e_date], tickformat="%d\n%b")
+            fig.update_layout(height=len(assets)*40 + 80, showlegend=False, margin=dict(l=0, r=0, t=30, b=0))
             st.plotly_chart(fig, use_container_width=True)
 
-# 5. MODUŁ EDYCJI (BEZ SCROLLA - FILTROWANIE)
-with tabs[1]:
-    st.info("🔍 Wybierz pojazd z listy, aby go edytować. Dzięki temu tabela będzie krótka i czytelna.")
+with tab_edit:
+    st.markdown("### Pełna lista pojazdów")
     
-    selected_asset = st.selectbox("Wybierz zasób do edycji/dodania wpisu:", ["WSZYSTKIE"] + ALL_RESOURCES)
-    
-    # Filtrujemy dane do edycji
-    if selected_asset == "WSZYSTKIE":
-        df_to_edit = df.copy()
-    else:
-        df_to_edit = df[df['pojazd'] == selected_asset].copy()
-
+    # KONTROLA SZEROKOŚCI: Ustawiamy tak, by całość mieściła się w poziomie
     edited_df = st.data_editor(
-        df_to_edit,
+        df,
         num_rows="dynamic",
         use_container_width=True,
+        height=700,
+        hide_index=True,
         column_config={
-            "pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_RESOURCES, width="medium"),
-            "event": st.column_config.TextColumn("Event", width="medium"),
+            "pojazd": st.column_config.SelectboxColumn("Pojazd", options=ALL_RESOURCES, width="medium", required=True),
+            "event": st.column_config.TextColumn("Event/Projekt", width="small"),
             "start": st.column_config.DateColumn("Start", width="small"),
             "koniec": st.column_config.DateColumn("Koniec", width="small"),
-            "kierowca": st.column_config.TextColumn("Kierowca", width="medium"),
-            "notatka": st.column_config.TextColumn("Notatka", width="large")
+            "kierowca": st.column_config.TextColumn("Kierowca", width="small"),
+            "notatka": st.column_config.TextColumn("Notatki (widoczne bez przewijania)", width="large"),
         },
-        key="filtered_editor"
+        key="full_fleet_editor"
     )
 
-    if st.button("ZAPISZ ZMIANY"):
-        with st.status("Zapisywanie..."):
-            # Jeśli edytowaliśmy tylko jeden pojazd, musimy połączyć to z resztą bazy
-            if selected_asset != "WSZYSTKIE":
-                # Usuwamy stare wpisy dla tego pojazdu i dodajemy nowe
-                other_assets_df = df[df['pojazd'] != selected_asset]
-                final_df = pd.concat([other_assets_df, edited_df])
-            else:
-                final_df = edited_df
-
-            # Przygotowanie do zapisu
-            final_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-            final_df['Start'] = pd.to_datetime(final_df['Start']).dt.strftime('%Y-%m-%d')
-            final_df['Koniec'] = pd.to_datetime(final_df['Koniec']).dt.strftime('%Y-%m-%d')
-            conn.update(data=final_df)
+    if st.button("💾 ZAPISZ CAŁĄ BAZĘ"):
+        with st.status("Zapisywanie danych do arkusza..."):
+            save_df = edited_df.copy()
+            save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+            save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
+            save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
+            conn.update(data=save_df)
             st.rerun()
