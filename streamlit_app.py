@@ -49,7 +49,7 @@ st.markdown("""
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.4 (Bulletproof Text Mode)</p>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.7 (Conflict Protection Mode)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -108,7 +108,7 @@ st.session_state["active_tab_index"] = tab_titles.index(active_tab)
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 6. GENEROWANIE WYKRESU (METODA GO.BAR - NAJBARDZIEJ STABILNA)
+# 6. WYKRES
 # -----------------------------------------------------------------------------
 if active_tab in RESOURCES:
     assets_to_show = RESOURCES[active_tab]
@@ -117,12 +117,8 @@ if active_tab in RESOURCES:
     
     if not plot_df.empty:
         fig = go.Figure()
-
-        # Ręcznie dodajemy każdy projekt jako pasek, aby wymusić tekst
         for event_name, group in plot_df.groupby('event'):
-            # Obliczamy czas trwania (width) dla go.Bar
             widths = (group['koniec'] - group['start']).dt.total_seconds() * 1000
-            
             fig.add_trace(go.Bar(
                 y=group['pojazd'],
                 x=widths,
@@ -133,7 +129,7 @@ if active_tab in RESOURCES:
                 textposition='inside',
                 insidetextanchor='start',
                 textfont=dict(size=14, color='white', family="Inter"),
-                constraintext='none', # WYMUSZA brak znikania tekstu
+                constraintext='none',
                 hovertemplate="<b>%{y}</b><br>Projekt: %{text}<br>Start: %{base|%d %b}<extra></extra>"
             ))
 
@@ -143,31 +139,21 @@ if active_tab in RESOURCES:
             showlegend=False,
             template="plotly_white",
             margin=dict(l=10, r=20, t=50, b=10),
-            xaxis=dict(
-                type='date',
-                range=[start_v, end_v],
-                side='top',
-                tickformat="%d\n%b",
-                tickfont=dict(size=16, weight='bold')
-            ),
-            yaxis=dict(
-                categoryorder='array',
-                categoryarray=assets_to_show[::-1], # Odwrócenie kolejności by pasowało do listy
-                tickfont=dict(size=14, weight='bold')
-            )
+            xaxis=dict(type='date', range=[start_v, end_v], side='top', tickformat="%d\n%b", tickfont=dict(size=16, weight='bold')),
+            yaxis=dict(categoryorder='array', categoryarray=assets_to_show[::-1], tickfont=dict(size=14, weight='bold'))
         )
-        
         fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
-        
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     else:
         st.info(f"Brak projektów dla: {active_tab}")
 
 # -----------------------------------------------------------------------------
-# 7. EDYCJA
+# 7. EDYCJA Z OCHRONĄ PRZED KOLIZJAMI
 # -----------------------------------------------------------------------------
 elif active_tab == "🔧 EDYCJA / ARKUSZ":
     st.subheader("Główny Panel Edycji")
+    st.warning("System zweryfikuje kolizje dat przy próbie zapisu.")
+    
     edited_df = st.data_editor(
         df, num_rows="dynamic", use_container_width=True, hide_index=True, height=850,
         column_config={
@@ -179,11 +165,43 @@ elif active_tab == "🔧 EDYCJA / ARKUSZ":
             "notatka": st.column_config.TextColumn("📝 NOTATKI", width=500)
         }
     )
+
     if st.button("💾 ZAPISZ ZMIANY", use_container_width=True):
-        save_df = edited_df[edited_df['event'] != ""].copy()
-        save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-        save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
-        save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
-        conn.update(data=save_df)
-        st.success("Zapisano!")
-        st.rerun()
+        # 1. Przygotowanie danych do walidacji
+        valid_data = edited_df[edited_df['event'] != ""].copy()
+        valid_data['start'] = pd.to_datetime(valid_data['start'])
+        valid_data['koniec'] = pd.to_datetime(valid_data['koniec'])
+        
+        conflicts = []
+        
+        # 2. LOGIKA SPRAWDZANIA KOLIZJI
+        for pojazd in valid_data['pojazd'].unique():
+            vehicle_reservations = valid_data[valid_data['pojazd'] == pojazd].sort_values('start')
+            
+            # Sprawdzamy każdą parę rezerwacji tego samego auta
+            res_list = vehicle_reservations.to_dict('records')
+            for i in range(len(res_list)):
+                for j in range(i + 1, len(res_list)):
+                    r1 = res_list[i]
+                    r2 = res_list[j]
+                    
+                    # Warunek nakładania się dat:
+                    # (StartA < KoniecB) ORAZ (StartB < KoniecA)
+                    if (r1['start'] < r2['koniec']) and (r2['start'] < r1['koniec']):
+                        conflicts.append(f"🔴 **{pojazd}**: Konflikt między '{r1['event']}' a '{r2['event']}'")
+
+        # 3. DECYZJA O ZAPISIE
+        if conflicts:
+            st.error("### ❌ NIE MOŻNA ZAPISAĆ - WYKRYTO KOLIZJE DAT!")
+            for c in conflicts:
+                st.write(c)
+            st.info("Popraw daty w tabeli powyżej i spróbuj ponownie.")
+        else:
+            # Brak konfliktów - zapisujemy
+            save_df = valid_data.copy()
+            save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+            save_df['Start'] = save_df['Start'].dt.strftime('%Y-%m-%d')
+            save_df['Koniec'] = save_df['Koniec'].dt.strftime('%Y-%m-%d')
+            conn.update(data=save_df)
+            st.success("✅ Zmiany zapisane pomyślnie! Brak konfliktów.")
+            st.rerun()
