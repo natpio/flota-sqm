@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # -----------------------------------------------------------------------------
 def check_password():
     def password_entered():
-        if st.session_state["password"] == "KOMORNIKIsqm":
+        if st.session_state["password"] == "SQM2026":
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
@@ -39,13 +39,13 @@ st.markdown("""
     .stApp { background-color: #f8fafc; font-family: 'Inter', sans-serif; }
     .sqm-header {
         background: #0f172a; padding: 1.5rem; border-radius: 12px; color: white;
-        margin-bottom: 1.5rem; border-left: 8px solid #2563eb;
+        margin-bottom: 1.5rem; border-left: 8px solid #ef4444;
     }
     [data-testid="stDataEditor"] div { font-size: 16px !important; }
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 2.8rem; letter-spacing: -2px;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v17.0</p>
+        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v18.0 (Safety & Backup Recovery)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -59,7 +59,6 @@ RESOURCES = {
     "🏠 NOCLEGI": ["MIESZKANIE BCN - TORRASA", "MIESZKANIE BCN - ARGENTINA (PM)"]
 }
 
-# Budowa mapy etykiet dla lepszego wyrównania
 ALL_ASSETS_ORDERED = []
 ASSET_TO_CAT_ICON = {}
 for cat, assets in RESOURCES.items():
@@ -73,12 +72,16 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
     try:
+        # ttl=0 wymusza pobranie świeżych danych bez cache
         raw = conn.read(ttl="0s")
+        if raw.empty:
+            return pd.DataFrame(columns=['pojazd', 'event', 'start', 'koniec', 'kierowca', 'notatka'])
         raw.columns = [str(c).strip().lower() for c in raw.columns]
         raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
         raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
         return raw.dropna(subset=['pojazd']).fillna("")
-    except:
+    except Exception as e:
+        st.error(f"Błąd pobierania danych: {e}")
         return pd.DataFrame(columns=['pojazd', 'event', 'start', 'koniec', 'kierowca', 'notatka'])
 
 if "main_df" not in st.session_state:
@@ -88,86 +91,53 @@ if "main_df" not in st.session_state:
 # 4. SIDEBAR
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.header("PLANOWANIE")
+    st.header("NARZĘDZIA")
     today = datetime.now()
-    view_range = st.date_input("ZAKRES CZASU:", value=(today - timedelta(days=2), today + timedelta(days=16)))
-    if st.button("🔄 ODŚWIEŻ"):
+    view_range = st.date_input("ZAKRES:", value=(today - timedelta(days=2), today + timedelta(days=16)))
+    if st.button("🔄 WYMUŚ ODŚWIEŻENIE"):
         st.session_state.main_df = get_data()
         st.rerun()
+    st.divider()
+    st.warning("Pamiętaj: Po edycji w tabeli kliknij przycisk ZAPISZ na samym dole.")
 
 start_v, end_v = view_range if isinstance(view_range, tuple) and len(view_range) == 2 else (today - timedelta(days=2), today + timedelta(days=16))
 
 # -----------------------------------------------------------------------------
-# 5. NOWA FUNKCJA WYKRESU (Poprawiona czytelność)
+# 5. WYKRES GANTTA
 # -----------------------------------------------------------------------------
 def draw_precision_gantt(df_to_plot, assets_to_list, height=600):
     fig = go.Figure()
+    fig.add_trace(go.Scatter(y=assets_to_list, x=[None]*len(assets_to_list), showlegend=False))
     
-    # Podkładka dla wszystkich aut - zapewnia idealne wyrównanie napisów na osi Y
-    fig.add_trace(go.Scatter(
-        y=assets_to_list, x=[None]*len(assets_to_list), 
-        showlegend=False, cliponaxis=False
-    ))
-
-    # Paski zadań
     clean_plot = df_to_plot[df_to_plot['start'] != ""].copy()
     if not clean_plot.empty:
-        # Konwersja nazw pojazdów na etykiety z ikonami
         clean_plot['y_label'] = clean_plot['pojazd'].apply(lambda x: f"{ASSET_TO_CAT_ICON.get(x, '•')} {x}")
-        
         for ev, group in clean_plot.groupby('event'):
             dur = (group['koniec'] - group['start']).dt.total_seconds() * 1000
             fig.add_trace(go.Bar(
-                y=group['y_label'], 
-                x=dur, 
-                base=group['start'],
-                orientation='h', 
-                name=ev, 
-                text=group['event'],
-                textposition='inside', 
-                insidetextanchor='start',
-                # Zwiększona czcionka wewnątrz paska
-                textfont=dict(size=14, color='white', family="Inter"),
+                y=group['y_label'], x=dur, base=group['start'],
+                orientation='h', name=ev, text=group['event'],
+                textposition='inside', insidetextanchor='start',
+                textfont=dict(size=14, color='white'),
                 marker=dict(line=dict(width=1, color='rgba(255,255,255,0.3)')),
                 hovertemplate="<b>%{y}</b><br>%{text}<extra></extra>"
             ))
     
     fig.update_layout(
-        barmode='overlay', 
-        height=height, 
-        showlegend=False, 
-        template="plotly_white",
+        barmode='overlay', height=height, showlegend=False, template="plotly_white",
         margin=dict(l=20, r=20, t=60, b=20),
-        xaxis=dict(
-            type='date', 
-            range=[start_v, end_v], 
-            side='top', 
-            tickformat="%d\n%b", 
-            tickfont=dict(size=15, weight='bold', color="#1e293b"),
-            showgrid=True, 
-            gridcolor='#cbd5e1', # Wyraźniejsza siatka pionowa
-            gridwidth=1,
-            dtick="D1"
-        ),
-        yaxis=dict(
-            categoryorder='array', 
-            categoryarray=assets_to_list[::-1], 
-            automargin=True, # Zapobiega ucinaniu długich nazw aut
-            tickfont=dict(size=16, weight='bold', color="#0f172a"),
-            fixedrange=True,
-            showgrid=True,
-            gridcolor='#f1f5f9'
-        )
+        xaxis=dict(type='date', range=[start_v, end_v], side='top', tickformat="%d\n%b", 
+                   tickfont=dict(size=15, weight='bold'), showgrid=True, gridcolor='#cbd5e1', dtick="D1"),
+        yaxis=dict(categoryorder='array', categoryarray=assets_to_list[::-1], automargin=True, 
+                   tickfont=dict(size=16, weight='bold'), showgrid=True, gridcolor='#f1f5f9')
     )
-    # Dzisiejsza data - czerwona gruba linia
     fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
-    
     return fig
 
 # -----------------------------------------------------------------------------
-# 6. WIDOKI
+# 6. MENU I WIDOKI
 # -----------------------------------------------------------------------------
-tabs = list(RESOURCES.keys()) + ["🔧 EDYCJA I PLANOWANIE"]
+tabs = list(RESOURCES.keys()) + ["🔧 EDYCJA I ZAPIS"]
 active_tab = st.radio("MENU:", tabs, horizontal=True)
 st.divider()
 
@@ -176,34 +146,37 @@ if active_tab in RESOURCES:
     icon = active_tab[0]
     labels = [f"{icon} {a}" for a in group_assets]
     df_f = st.session_state.main_df[st.session_state.main_df['pojazd'].isin(group_assets)]
-    # Zwiększony mnożnik wysokości: 65px na auto
     st.plotly_chart(draw_precision_gantt(df_f, labels, height=len(labels)*65 + 100), use_container_width=True)
 
 else:
-    st.subheader("Planowanie i Edycja")
-    search_q = st.text_input("🔍 SZUKAJ POJAZDU LUB PROJEKTU:", "").lower()
+    st.subheader("Panel Edycji i Bezpiecznego Zapisu")
+    search_q = st.text_input("🔍 SZUKAJ:", "").lower()
     
-    # Filtrowanie
-    display_df = st.session_state.main_df.copy()
+    # Kopia danych do edycji
+    working_df = st.session_state.main_df.copy()
+    
     if search_q:
-        mask = display_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
-        display_df = display_df[mask]
+        mask = working_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
+        display_df = working_df[mask]
         current_labels = [l for l in ALL_ASSETS_ORDERED if search_q in l.lower()]
     else:
+        display_df = working_df
         current_labels = ALL_ASSETS_ORDERED
 
-    with st.expander("📊 PODGLĄD GRAFIZNY (WYSOKA CZYTELNOŚĆ)", expanded=True):
+    with st.expander("📊 PODGLĄD GRAFICZNY", expanded=True):
         st.plotly_chart(draw_precision_gantt(display_df, current_labels, height=len(current_labels)*55 + 150), use_container_width=True)
 
     st.markdown("### ✏️ TABELA DANYCH")
     CLEAN_LIST = [a for sub in RESOURCES.values() for a in sub]
+    
+    # Ważne: data_editor musi dostać cały zestaw danych lub przemyślaną filtrację
     edited_df = st.data_editor(
         display_df,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
-        height=500,
-        key="editor_v17",
+        height=600,
+        key="editor_safe_v18",
         column_config={
             "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=CLEAN_LIST, width=280, required=True),
             "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
@@ -214,16 +187,38 @@ else:
         }
     )
 
-    if st.button("💾 ZAPISZ ZMIANY", use_container_width=True):
-        # ... (Logika zapisu pozostaje niezmienna, jest sprawdzona)
-        valid_data = edited_df[edited_df['event'] != ""].copy()
-        valid_data['start'] = pd.to_datetime(valid_data['start'])
-        valid_data['koniec'] = pd.to_datetime(valid_data['koniec'])
-        save_df = valid_data.copy()
-        save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-        save_df['Start'] = save_df['Start'].dt.strftime('%Y-%m-%d')
-        save_df['Koniec'] = save_df['Koniec'].dt.strftime('%Y-%m-%d')
-        conn.update(data=save_df)
-        st.session_state.main_df = get_data()
-        st.success("Zapisano!")
-        st.rerun()
+    # PRZYCISK ZAPISU Z BLOKADĄ PUSTYCH DANYCH
+    if st.button("💾 ZAPISZ ZMIANY DO ARKUSZA", use_container_width=True, type="primary"):
+        if edited_df.empty and not st.session_state.main_df.empty:
+            st.error("UWAGA: Próba zapisu pustej tabeli! Operacja zablokowana dla bezpieczeństwa.")
+        else:
+            try:
+                # 1. Przygotowanie danych
+                final_to_save = edited_df.copy()
+                final_to_save = final_to_save[final_to_save['pojazd'] != ""] # usuń puste wiersze
+                
+                # 2. Konwersja dat na stringi dla GSheets
+                final_to_save['start'] = pd.to_datetime(final_to_save['start']).dt.strftime('%Y-%m-%d')
+                final_to_save['koniec'] = pd.to_datetime(final_to_save['koniec']).dt.strftime('%Y-%m-%d')
+                
+                # 3. Dopasowanie nazw kolumn do arkusza (Pojazd, EVENT, Start, Koniec, Kierowca, Notatka)
+                final_to_save.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+                
+                # 4. Krytyczny check
+                if len(final_to_save) == 0 and len(st.session_state.main_df) > 0:
+                    st.warning("Nie wykryto danych do zapisu. Jeśli chciałeś wyczyścić arkusz, zrób to ręcznie w Google Sheets.")
+                else:
+                    conn.update(data=final_to_save)
+                    st.session_state.main_df = get_data()
+                    st.success(f"✅ Pomyślnie zapisano {len(final_to_save)} wierszy!")
+                    st.balloons()
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Krytyczny błąd zapisu: {e}")
+
+# -----------------------------------------------------------------------------
+# 7. RECOVERY / DEBUG (Ukryte na dole)
+# -----------------------------------------------------------------------------
+with st.expander("🛠️ NARZĘDZIA RATUNKOWE (Tylko w przypadku problemów)"):
+    st.write("Ostatni stan w pamięci aplikacji:")
+    st.dataframe(st.session_state.main_df)
