@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. SYSTEM LOGOWANIA
+# 1. LOGOWANIE
 # -----------------------------------------------------------------------------
 def check_password():
     def password_entered():
@@ -29,7 +29,7 @@ if not check_password():
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 2. KONFIGURACJA I STYLE CSS
+# 2. STYLE CSS
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="SQM LOGISTICS", layout="wide", initial_sidebar_state="expanded")
 
@@ -49,12 +49,12 @@ st.markdown("""
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.2 (Osobowe Fix)</p>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.3 (Force Annotation Mode)</p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. ZASOBY SQM
+# 3. ZASOBY
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": ["31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS", "TIR 3- PNT3530A/PZ4U343 DANIELAK", "44 - SOLO PY 73262", "45 - PY1541M + przyczepa", "SPEDYCJA", "AUTO RENTAL"],
@@ -70,11 +70,8 @@ def get_data():
     try:
         raw = conn.read(ttl="0s")
         raw.columns = [str(c).strip().lower() for c in raw.columns]
-        # Kluczowe: usuwamy puste wiersze zanim zaczniemy procesować
-        raw = raw.dropna(subset=['pojazd'])
         raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
         raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
-        
         skeleton = pd.DataFrame({'pojazd': ALL_ASSETS})
         merged = pd.merge(skeleton, raw, on='pojazd', how='left')
         return merged.fillna("")
@@ -111,39 +108,40 @@ st.session_state["active_tab_index"] = tab_titles.index(active_tab)
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 6. WYKRES (FIX DLA OSOBOWYCH)
+# 6. GENEROWANIE WYKRESU (NOWA METODA ADNOTACJI)
 # -----------------------------------------------------------------------------
 if active_tab in RESOURCES:
     assets_to_show = RESOURCES[active_tab]
-    # Filtrujemy dane TYLKO dla wybranych aut i TYLKO z poprawną datą
     plot_df = df[df['pojazd'].isin(assets_to_show)].copy()
     plot_df = plot_df[plot_df['start'] != ""].copy()
     
-    # WYMUSZENIE TYPÓW (Kluczowe dla kategorii Osobowe)
-    plot_df['pojazd'] = plot_df['pojazd'].astype(str)
-    plot_df['event'] = plot_df['event'].astype(str)
-
     if not plot_df.empty:
+        # Tworzymy bazę wykresu bez tekstu w traces
         fig = px.timeline(
             plot_df, x_start="start", x_end="koniec", y="pojazd",
             color="event",
-            text="event",
             category_orders={"pojazd": assets_to_show}, 
             template="plotly_white",
             color_discrete_sequence=px.colors.qualitative.Prism
         )
         
-        # Agresywne ustawienie etykiet
-        fig.update_traces(
-            textposition="inside",
-            insidetextanchor="start",
-            textfont=dict(size=14, color="white", family="Inter"),
-            cliponaxis=False 
-        )
-        
+        # DODAWANIE ADNOTACJI (Ręczne wymuszenie tekstu na każdym pasku)
+        annotations = []
+        for i, row in plot_df.iterrows():
+            # Obliczamy środek paska dla tekstu
+            mid_point = row['start'] + (row['koniec'] - row['start']) / 2
+            annotations.append(dict(
+                x=mid_point,
+                y=row['pojazd'],
+                text=f"<b>{row['event']}</b>",
+                showarrow=False,
+                font=dict(size=14, color="white"),
+                xanchor='center',
+                yanchor='middle'
+            ))
+
         fig.update_layout(
-            uniformtext_minsize=12, 
-            uniformtext_mode='show',
+            annotations=annotations,
             height=max(500, len(assets_to_show)*60 + 100), 
             showlegend=False, 
             margin=dict(l=10, r=20, t=50, b=10),
@@ -156,7 +154,7 @@ if active_tab in RESOURCES:
         
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     else:
-        st.info(f"Brak przypisanych projektów dla: {active_tab}")
+        st.info(f"Brak projektów dla: {active_tab}")
 
 # -----------------------------------------------------------------------------
 # 7. EDYCJA
