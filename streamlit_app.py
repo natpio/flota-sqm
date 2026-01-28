@@ -45,7 +45,7 @@ st.markdown("""
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 2.8rem; letter-spacing: -2px;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v17.0 (Precision Layout)</p>
+        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v17.0</p>
     </div>
     """, unsafe_allow_html=True)
 
