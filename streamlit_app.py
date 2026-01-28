@@ -29,7 +29,7 @@ if not check_password():
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 2. KONFIGURACJA I STYLE
+# 2. STYLE CSS I KONFIGURACJA
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="SQM LOGISTICS", layout="wide", initial_sidebar_state="expanded")
 
@@ -38,22 +38,22 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@700;900&display=swap');
     .stApp { background-color: #f1f5f9; font-family: 'Inter', sans-serif; }
     .sqm-header {
-        background: #0f172a; padding: 1.5rem; border-radius: 15px; color: white;
-        margin-bottom: 2rem; border-bottom: 8px solid #2563eb;
+        background: #0f172a; padding: 2rem; border-radius: 15px; color: white;
+        margin-bottom: 2rem; border-bottom: 10px solid #2563eb;
     }
-    [data-testid="stDataEditor"] div { font-size: 16px !important; }
-    .st-emotion-cache-1kyx60r { background-color: #ffffff; border-radius: 10px; padding: 20px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
-    ::-webkit-scrollbar { width: 18px; height: 18px; }
-    ::-webkit-scrollbar-thumb { background: #2563eb; border-radius: 10px; border: 4px solid #f1f5f9; }
+    [data-testid="stDataEditor"] div { font-size: 18px !important; }
+    ::-webkit-scrollbar { width: 22px !important; height: 22px !important; }
+    ::-webkit-scrollbar-track { background: #cbd5e1 !important; }
+    ::-webkit-scrollbar-thumb { background: #2563eb !important; border-radius: 10px; border: 4px solid #cbd5e1 !important; }
     </style>
     <div class="sqm-header">
-        <h1 style="margin:0; font-size: 3rem; letter-spacing: -2px;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.7;">Fleet & Transport Management System v11.0</p>
+        <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v12.0 (Stable Full Code)</p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. ZASOBY I DANE
+# 3. ZASOBY
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": ["31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS", "TIR 3- PNT3530A/PZ4U343 DANIELAK", "44 - SOLO PY 73262", "45 - PY1541M + przyczepa", "SPEDYCJA", "AUTO RENTAL"],
@@ -65,133 +65,140 @@ ALL_ASSETS = [item for sublist in RESOURCES.values() for item in sublist]
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def load_data():
+def get_data():
     try:
-        data = conn.read(ttl="0s")
-        data.columns = [str(c).strip().lower() for c in data.columns]
-        data['start'] = pd.to_datetime(data['start'], errors='coerce')
-        data['koniec'] = pd.to_datetime(data['koniec'], errors='coerce')
-        return data.dropna(subset=['pojazd']).sort_values('start', ascending=False)
+        raw = conn.read(ttl="0s")
+        raw.columns = [str(c).strip().lower() for c in raw.columns]
+        raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
+        raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
+        # Usuwamy puste wiersze, by nie zaśmiecać widoku
+        raw = raw.dropna(subset=['pojazd'])
+        return raw.fillna("")
     except:
         return pd.DataFrame(columns=['pojazd', 'event', 'start', 'koniec', 'kierowca', 'notatka'])
 
-if "fleet_db" not in st.session_state:
-    st.session_state.fleet_db = load_data()
+# Główne dane ładowane do sesji (zapobiega resetom sortowania)
+if "main_df" not in st.session_state:
+    st.session_state.main_df = get_data()
 
 # -----------------------------------------------------------------------------
 # 4. SIDEBAR
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ FILTRY WIDOKU")
-    t = datetime.now()
-    v_range = st.date_input("ZAKRES KALENDARZA:", value=(t - timedelta(days=2), t + timedelta(days=30)))
+    st.header("⚙️ USTAWIENIA")
+    today = datetime.now()
+    view_range = st.date_input("ZAKRES WIDOKU:", value=(today - timedelta(days=2), today + timedelta(days=21)))
     
-    st.divider()
-    if st.button("🔄 POBIERZ ŚWIEŻE DANE", use_container_width=True):
-        st.session_state.fleet_db = load_data()
+    if st.button("🔄 ODŚWIEŻ Z ARKUSZA"):
+        st.session_state.main_df = get_data()
         st.rerun()
-    
-    if st.button("🚪 WYLOGUJ", use_container_width=True):
+
+    if st.button("WYLOGUJ"):
         st.session_state["password_correct"] = False
         st.rerun()
 
-# -----------------------------------------------------------------------------
-# 5. PANEL STATYSTYK (NOWOŚĆ)
-# -----------------------------------------------------------------------------
-today_events = st.session_state.fleet_db[
-    (st.session_state.fleet_db['start'].dt.date <= t.date()) & 
-    (st.session_state.fleet_db['koniec'].dt.date >= t.date())
-]
-c1, c2, c3 = st.columns(3)
-c1.metric("AUTA W TRASIE (DZIŚ)", len(today_events['pojazd'].unique()))
-c2.metric("AKTYWNE PROJEKTY", len(today_events['event'].unique()))
-c3.metric("DOSTĘPNE ZASOBY", len(ALL_ASSETS) - len(today_events['pojazd'].unique()))
+if isinstance(view_range, tuple) and len(view_range) == 2:
+    start_v, end_v = view_range
+else:
+    start_v, end_v = today - timedelta(days=2), today + timedelta(days=21)
 
 # -----------------------------------------------------------------------------
-# 6. NAWIGACJA I WYKRESY
+# 5. NAWIGACJA
 # -----------------------------------------------------------------------------
-tabs = list(RESOURCES.keys()) + ["🔧 PANEL EDYCJI"]
-sel_tab = st.radio("NAWIGACJA:", tabs, horizontal=True)
+tabs = list(RESOURCES.keys()) + ["🔧 EDYCJA / ARKUSZ"]
+active_tab = st.radio("MENU:", tabs, horizontal=True)
+st.divider()
 
-if sel_tab in RESOURCES:
-    group = RESOURCES[sel_tab]
-    df_p = st.session_state.fleet_db[st.session_state.fleet_db['pojazd'].isin(group)].copy()
-    df_p = df_p.dropna(subset=['start', 'koniec'])
+# -----------------------------------------------------------------------------
+# 6. WYKRES (Bulletproof Mode)
+# -----------------------------------------------------------------------------
+if active_tab in RESOURCES:
+    assets_to_show = RESOURCES[active_tab]
+    plot_df = st.session_state.main_df[st.session_state.main_df['pojazd'].isin(assets_to_show)].copy()
+    plot_df = plot_df[plot_df['start'] != ""].copy()
     
     fig = go.Figure()
-    for ev, g in df_p.groupby('event'):
-        dur = (g['koniec'] - g['start']).dt.total_seconds() * 1000
-        fig.add_trace(go.Bar(
-            y=g['pojazd'], x=dur, base=g['start'],
-            orientation='h', name=ev, text=g['event'],
-            textposition='inside', insidetextanchor='start',
-            textfont=dict(size=14, color='white'),
-            constraintext='none',
-            hovertemplate="<b>%{y}</b><br>Projekt: %{text}<extra></extra>"
-        ))
-    
+    # Zapewnienie, że wszystkie auta z kategorii są na osi Y, nawet jak nie mają eventu
+    fig.add_trace(go.Scatter(y=assets_to_show, x=[None]*len(assets_to_show), showlegend=False))
+
+    if not plot_df.empty:
+        for event_name, group in plot_df.groupby('event'):
+            widths = (group['koniec'] - group['start']).dt.total_seconds() * 1000
+            fig.add_trace(go.Bar(
+                y=group['pojazd'], x=widths, base=group['start'],
+                orientation='h', name=event_name, text=group['event'],
+                textposition='inside', insidetextanchor='start',
+                textfont=dict(size=14, color='white'),
+                constraintext='none',
+                hovertemplate="<b>%{y}</b><br>Projekt: %{text}<extra></extra>"
+            ))
+
     fig.update_layout(
-        barmode='overlay', height=max(400, len(group)*55),
-        margin=dict(l=10, r=10, t=40, b=10), template="plotly_white",
-        xaxis=dict(type='date', range=v_range, side='top', tickformat="%d %b"),
-        yaxis=dict(categoryorder='array', categoryarray=group[::-1]),
-        showlegend=False
+        barmode='overlay', height=max(500, len(assets_to_show)*60 + 100),
+        showlegend=False, template="plotly_white", margin=dict(l=10, r=20, t=50, b=10),
+        xaxis=dict(type='date', range=[start_v, end_v], side='top', tickformat="%d\n%b", tickfont=dict(size=16, weight='bold')),
+        yaxis=dict(categoryorder='array', categoryarray=assets_to_show[::-1], tickfont=dict(size=14, weight='bold'))
     )
-    fig.add_vline(x=t.timestamp()*1000, line_width=3, line_color="red")
-    st.plotly_chart(fig, use_container_width=True)
+    fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 # -----------------------------------------------------------------------------
-# 7. EDYCJA (PEŁNA FUNKCJONALNOŚĆ)
+# 7. PANEL EDYCJI (Sortowanie i Wyszukiwarka)
 # -----------------------------------------------------------------------------
 else:
-    st.subheader("Centralna Baza Transportowa")
-    sq = st.text_input("🔍 Wyszukaj (np. nr rejestracyjny, projekt, kierowca):", "").lower()
+    st.subheader("Główny Panel Edycji")
     
-    d_edit = st.session_state.fleet_db.copy()
-    if sq:
-        d_edit = d_edit[d_edit.astype(str).apply(lambda x: x.str.lower().str.contains(sq).any(), axis=1)]
+    # Wyszukiwarka
+    search_q = st.text_input("🔍 WYSZUKAJ (Pojazd, Projekt, Kierowca):", "").lower()
+    
+    # Filtrowanie widoku
+    display_df = st.session_state.main_df.copy()
+    if search_q:
+        mask = display_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
+        display_df = display_df[mask]
 
-    st.caption("Sortuj klikając w nagłówki. Aby dodać nowy wpis, zjedź na sam dół.")
-    
-    res_edit = st.data_editor(
-        d_edit,
+    # EDYTOR - klucz 'key' zapewnia stabilność sortowania
+    edited_df = st.data_editor(
+        display_df,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
-        height=600,
-        key="editor_v11",
+        height=800,
+        key="editor_v12_stable",
         column_config={
-            "pojazd": st.column_config.SelectboxColumn("🚛 POJAZD", options=ALL_ASSETS, width="medium", required=True),
-            "event": st.column_config.TextColumn("📋 PROJEKT / CEL", width="medium"),
-            "start": st.column_config.DateColumn("📅 OD", width="small"),
-            "koniec": st.column_config.DateColumn("🏁 DO", width="small"),
-            "kierowca": st.column_config.TextColumn("👤 KIEROWCA", width="small"),
-            "notatka": st.column_config.TextColumn("📝 NOTATKI / SLOTY", width="large")
+            "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=ALL_ASSETS, width=300, required=True),
+            "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
+            "start": st.column_config.DateColumn("📅 START", width=130),
+            "koniec": st.column_config.DateColumn("🏁 KONIEC", width=130),
+            "kierowca": st.column_config.TextColumn("👤 KIER.", width=120),
+            "notatka": st.column_config.TextColumn("📝 NOTATKI", width=500)
         }
     )
 
-    if st.button("💾 ZAPISZ DO ARKUSZA I WERYFIKUJ", use_container_width=True):
-        # Walidacja
-        valid = res_edit.dropna(subset=['pojazd', 'event', 'start', 'koniec']).copy()
-        valid['start'] = pd.to_datetime(valid['start'])
-        valid['koniec'] = pd.to_datetime(valid['koniec'])
+    if st.button("💾 ZAPISZ ZMIANY I WERYFIKUJ KOLIZJE", use_container_width=True):
+        # 1. Pobranie danych i konwersja
+        valid_data = edited_df[edited_df['event'] != ""].copy()
+        valid_data['start'] = pd.to_datetime(valid_data['start'])
+        valid_data['koniec'] = pd.to_datetime(valid_data['koniec'])
         
+        # 2. Sprawdzanie kolizji
         conflicts = []
-        for p in valid['pojazd'].unique():
-            subset = valid[valid['pojazd'] == p].sort_values('start')
-            reks = subset.to_dict('records')
-            for i in range(len(reks)-1):
-                if reks[i]['koniec'] > reks[i+1]['start']:
-                    conflicts.append(f"❌ {p}: '{reks[i]['event']}' nakłada się na '{reks[i+1]['event']}'")
-        
+        for p in valid_data['pojazd'].unique():
+            v_res = valid_data[valid_data['pojazd'] == p].sort_values('start')
+            res_list = v_res.to_dict('records')
+            for i in range(len(res_list)-1):
+                if res_list[i]['koniec'] > res_list[i+1]['start']:
+                    conflicts.append(f"❌ {p}: '{res_list[i]['event']}' nakłada się na '{res_list[i+1]['event']}'")
+
         if conflicts:
             for c in conflicts: st.error(c)
         else:
-            save_df = valid.copy()
+            # 3. Zapis
+            save_df = valid_data.copy()
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
             save_df['Start'] = save_df['Start'].dt.strftime('%Y-%m-%d')
             save_df['Koniec'] = save_df['Koniec'].dt.strftime('%Y-%m-%d')
             conn.update(data=save_df)
-            st.session_state.fleet_db = load_data()
-            st.success("Zapisano pomyślnie!")
+            st.session_state.main_df = get_data()
+            st.success("Zapisano!")
             st.rerun()
