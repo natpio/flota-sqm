@@ -42,13 +42,12 @@ st.markdown("""
         margin-bottom: 2rem; border-bottom: 10px solid #2563eb;
     }
     [data-testid="stDataEditor"] div { font-size: 18px !important; }
-    ::-webkit-scrollbar { width: 22px !important; height: 22px !important; }
-    ::-webkit-scrollbar-track { background: #cbd5e1 !important; }
-    ::-webkit-scrollbar-thumb { background: #2563eb !important; border-radius: 10px; border: 4px solid #cbd5e1 !important; }
+    ::-webkit-scrollbar { width: 18px !important; height: 18px !important; }
+    ::-webkit-scrollbar-thumb { background: #2563eb; border-radius: 10px; }
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v13.0 (Grid View & Stability)</p>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v14.0 (Hybrid Planning View)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -72,7 +71,7 @@ def get_data():
         raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
         raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
         raw = raw.dropna(subset=['pojazd'])
-        return raw.fillna("")
+        return raw.sort_values('start', ascending=False).fillna("")
     except:
         return pd.DataFrame(columns=['pojazd', 'event', 'start', 'koniec', 'kierowca', 'notatka'])
 
@@ -85,103 +84,100 @@ if "main_df" not in st.session_state:
 with st.sidebar:
     st.header("⚙️ USTAWIENIA")
     today = datetime.now()
-    view_range = st.date_input("ZAKRES WIDOKU:", value=(today - timedelta(days=2), today + timedelta(days=21)))
-    
-    if st.button("🔄 ODŚWIEŻ Z ARKUSZA"):
+    view_range = st.date_input("ZAKRES KALENDARZA:", value=(today - timedelta(days=2), today + timedelta(days=21)))
+    if st.button("🔄 ODŚWIEŻ DANE"):
         st.session_state.main_df = get_data()
         st.rerun()
 
-    if st.button("WYLOGUJ"):
-        st.session_state["password_correct"] = False
-        st.rerun()
-
-if isinstance(view_range, tuple) and len(view_range) == 2:
-    start_v, end_v = view_range
-else:
-    start_v, end_v = today - timedelta(days=2), today + timedelta(days=21)
+start_v, end_v = view_range if isinstance(view_range, tuple) and len(view_range) == 2 else (today - timedelta(days=2), today + timedelta(days=21))
 
 # -----------------------------------------------------------------------------
 # 5. NAWIGACJA
 # -----------------------------------------------------------------------------
-tabs = list(RESOURCES.keys()) + ["🔧 EDYCJA / ARKUSZ"]
+tabs = list(RESOURCES.keys()) + ["🔧 EDYCJA I PLANOWANIE"]
 active_tab = st.radio("MENU:", tabs, horizontal=True)
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 6. WYKRES (Gantt z pionową siatką i "kratką")
+# Funkcja pomocnicza do rysowania wykresu (używana w obu widokach)
 # -----------------------------------------------------------------------------
-if active_tab in RESOURCES:
-    assets_to_show = RESOURCES[active_tab]
-    plot_df = st.session_state.main_df[st.session_state.main_df['pojazd'].isin(assets_to_show)].copy()
-    plot_df = plot_df[plot_df['start'] != ""].copy()
-    
+def draw_gantt(df_to_plot, assets_list, height=500):
     fig = go.Figure()
+    fig.add_trace(go.Scatter(y=assets_list, x=[None]*len(assets_list), showlegend=False))
     
-    # Dodanie wszystkich aut na oś Y (nawet tych bez zadań)
-    fig.add_trace(go.Scatter(y=assets_to_show, x=[None]*len(assets_to_show), showlegend=False))
-
-    if not plot_df.empty:
-        for event_name, group in plot_df.groupby('event'):
-            widths = (group['koniec'] - group['start']).dt.total_seconds() * 1000
+    clean_plot = df_to_plot[df_to_plot['start'] != ""].copy()
+    if not clean_plot.empty:
+        for ev, group in clean_plot.groupby('event'):
+            dur = (group['koniec'] - group['start']).dt.total_seconds() * 1000
             fig.add_trace(go.Bar(
-                y=group['pojazd'], x=widths, base=group['start'],
-                orientation='h', name=event_name, text=group['event'],
+                y=group['pojazd'], x=dur, base=group['start'],
+                orientation='h', name=ev, text=group['event'],
                 textposition='inside', insidetextanchor='start',
-                textfont=dict(size=14, color='white'),
-                constraintext='none',
+                textfont=dict(size=12, color='white'),
                 hovertemplate="<b>%{y}</b><br>Projekt: %{text}<extra></extra>"
             ))
-
-    fig.update_layout(
-        barmode='overlay', height=max(500, len(assets_to_show)*60 + 100),
-        showlegend=False, template="plotly_white", margin=dict(l=10, r=20, t=50, b=10),
-        xaxis=dict(
-            type='date', range=[start_v, end_v], side='top', 
-            tickformat="%d\n%b", tickfont=dict(size=14, weight='bold'),
-            showgrid=True, gridcolor='rgba(0,0,0,0.1)', gridwidth=1, # Pionowe linie
-            dtick="D1" # Linia co każdy 1 dzień
-        ),
-        yaxis=dict(
-            categoryorder='array', categoryarray=assets_to_show[::-1], 
-            tickfont=dict(size=14, weight='bold'),
-            showgrid=True, gridcolor='rgba(0,0,0,0.05)' # Poziome linie
-        )
-    )
-    # Linia "DZIŚ"
-    fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
     
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    fig.update_layout(
+        barmode='overlay', height=height, showlegend=False, template="plotly_white",
+        margin=dict(l=10, r=10, t=40, b=10),
+        xaxis=dict(type='date', range=[start_v, end_v], side='top', tickformat="%d\n%b", 
+                   showgrid=True, gridcolor='rgba(0,0,0,0.1)', dtick="D1"),
+        yaxis=dict(categoryorder='array', categoryarray=assets_list[::-1], showgrid=True, gridcolor='rgba(0,0,0,0.05)')
+    )
+    fig.add_vline(x=today.timestamp()*1000, line_width=3, line_color="red")
+    return fig
 
 # -----------------------------------------------------------------------------
-# 7. PANEL EDYCJI
+# 6. WIDOKI STANDARDOWE
+# -----------------------------------------------------------------------------
+if active_tab in RESOURCES:
+    group_assets = RESOURCES[active_tab]
+    df_filtered = st.session_state.main_df[st.session_state.main_df['pojazd'].isin(group_assets)]
+    st.plotly_chart(draw_gantt(df_filtered, group_assets, height=max(500, len(group_assets)*50)), use_container_width=True)
+
+# -----------------------------------------------------------------------------
+# 7. HYBRYDOWY PANEL EDYCJI (ROZWIĄZANIE TWOJEGO PROBLEMU)
 # -----------------------------------------------------------------------------
 else:
-    st.subheader("Główny Panel Edycji")
-    search_q = st.text_input("🔍 WYSZUKAJ (Pojazd, Projekt, Kierowca):", "").lower()
+    st.subheader("Planowanie i Edycja")
+    search_q = st.text_input("🔍 FILTRUJ ZASOBY (np. Connect, TIR, nazwisko):", "").lower()
     
+    # Filtrowanie danych
     display_df = st.session_state.main_df.copy()
     if search_q:
         mask = display_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
         display_df = display_df[mask]
+        # Wyciągamy listę pojazdów które pasują do wyszukiwania
+        filtered_assets = [a for a in ALL_ASSETS if search_q in a.lower()] or display_df['pojazd'].unique().tolist()
+    else:
+        filtered_assets = ALL_ASSETS
 
+    # SEKACJA PODGLĄDU - Graficzny widok zajętości filtrowanych aut
+    with st.expander("📊 PODGLĄD ZAJĘTOŚCI DLA FILTROWANYCH AUT (Kliknij aby zwinąć/rozwinąć)", expanded=True):
+        dynamic_height = max(300, len(filtered_assets) * 35)
+        st.plotly_chart(draw_gantt(display_df, filtered_assets, height=dynamic_height), use_container_width=True)
+
+    # SEKCJA EDYCJI
+    st.markdown("### ✏️ TABELA EDYCJI")
     edited_df = st.data_editor(
         display_df,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
-        height=800,
-        key="editor_v13_stable",
+        height=500,
+        key="hybrid_editor",
         column_config={
-            "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=ALL_ASSETS, width=300, required=True),
-            "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
-            "start": st.column_config.DateColumn("📅 START", width=130),
-            "koniec": st.column_config.DateColumn("🏁 KONIEC", width=130),
-            "kierowca": st.column_config.TextColumn("👤 KIER.", width=120),
-            "notatka": st.column_config.TextColumn("📝 NOTATKI", width=500)
+            "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=ALL_ASSETS, width=250, required=True),
+            "event": st.column_config.TextColumn("📋 PROJEKT", width=150),
+            "start": st.column_config.DateColumn("📅 OD", width=110),
+            "koniec": st.column_config.DateColumn("🏁 DO", width=110),
+            "kierowca": st.column_config.TextColumn("👤 KIER.", width=100),
+            "notatka": st.column_config.TextColumn("📝 NOTATKI", width=400)
         }
     )
 
-    if st.button("💾 ZAPISZ ZMIANY I WERYFIKUJ KOLIZJE", use_container_width=True):
+    if st.button("💾 ZAPISZ WSZYSTKO I WERYFIKUJ", use_container_width=True):
+        # Walidacja i zapis (identyczna jak wcześniej, bo działała poprawnie)
         valid_data = edited_df[edited_df['event'] != ""].copy()
         valid_data['start'] = pd.to_datetime(valid_data['start'])
         valid_data['koniec'] = pd.to_datetime(valid_data['koniec'])
@@ -189,10 +185,10 @@ else:
         conflicts = []
         for p in valid_data['pojazd'].unique():
             v_res = valid_data[valid_data['pojazd'] == p].sort_values('start')
-            res_list = v_res.to_dict('records')
-            for i in range(len(res_list)-1):
-                if res_list[i]['koniec'] > res_list[i+1]['start']:
-                    conflicts.append(f"❌ {p}: '{res_list[i]['event']}' nakłada się na '{res_list[i+1]['event']}'")
+            reks = v_res.to_dict('records')
+            for i in range(len(reks)-1):
+                if reks[i]['koniec'] > reks[i+1]['start']:
+                    conflicts.append(f"❌ {p}: '{reks[i]['event']}' nakłada się na '{reks[i+1]['event']}'")
 
         if conflicts:
             for c in conflicts: st.error(c)
@@ -203,5 +199,5 @@ else:
             save_df['Koniec'] = save_df['Koniec'].dt.strftime('%Y-%m-%d')
             conn.update(data=save_df)
             st.session_state.main_df = get_data()
-            st.success("Zapisano!")
+            st.success("Zapisano! Grafik zaktualizowany.")
             st.rerun()
