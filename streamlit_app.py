@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # -----------------------------------------------------------------------------
 def check_password():
     def password_entered():
-        if st.session_state["password"] == "SQM2026":
+        if st.session_state["password"] == "KOMORNIKIsqm":
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
