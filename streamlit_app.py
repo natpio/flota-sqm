@@ -3,6 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import io
 
 # -----------------------------------------------------------------------------
 # 1. LOGOWANIE
@@ -39,13 +40,14 @@ st.markdown("""
     .stApp { background-color: #f8fafc; font-family: 'Inter', sans-serif; }
     .sqm-header {
         background: #0f172a; padding: 1.5rem; border-radius: 12px; color: white;
-        margin-bottom: 1.5rem; border-left: 8px solid #ef4444;
+        margin-bottom: 1.5rem; border-left: 8px solid #2563eb;
     }
     [data-testid="stDataEditor"] div { font-size: 16px !important; }
+    .stButton>button { border-radius: 8px; font-weight: bold; }
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 2.8rem; letter-spacing: -2px;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v18.0 (Safety & Backup Recovery)</p>
+        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v20.0 (Data Safety & Export Edition)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -59,29 +61,21 @@ RESOURCES = {
     "🏠 NOCLEGI": ["MIESZKANIE BCN - TORRASA", "MIESZKANIE BCN - ARGENTINA (PM)"]
 }
 
-ALL_ASSETS_ORDERED = []
-ASSET_TO_CAT_ICON = {}
-for cat, assets in RESOURCES.items():
-    icon = cat[0]
-    for a in assets:
-        label = f"{icon} {a}"
-        ALL_ASSETS_ORDERED.append(label)
-        ASSET_TO_CAT_ICON[a] = icon
+ASSET_TO_CAT_ICON = {a: cat[0] for cat, assets in RESOURCES.items() for a in assets}
+ALL_ASSETS_ORDERED = [f"{cat[0]} {a}" for cat, assets in RESOURCES.items() for a in assets]
+CLEAN_LIST = [a for sub in RESOURCES.values() for a in sub]
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
     try:
-        # ttl=0 wymusza pobranie świeżych danych bez cache
         raw = conn.read(ttl="0s")
-        if raw.empty:
-            return pd.DataFrame(columns=['pojazd', 'event', 'start', 'koniec', 'kierowca', 'notatka'])
+        if raw.empty: return pd.DataFrame(columns=['pojazd', 'event', 'start', 'koniec', 'kierowca', 'notatka'])
         raw.columns = [str(c).strip().lower() for c in raw.columns]
         raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
         raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
         return raw.dropna(subset=['pojazd']).fillna("")
-    except Exception as e:
-        st.error(f"Błąd pobierania danych: {e}")
+    except:
         return pd.DataFrame(columns=['pojazd', 'event', 'start', 'koniec', 'kierowca', 'notatka'])
 
 if "main_df" not in st.session_state:
@@ -93,12 +87,13 @@ if "main_df" not in st.session_state:
 with st.sidebar:
     st.header("NARZĘDZIA")
     today = datetime.now()
-    view_range = st.date_input("ZAKRES:", value=(today - timedelta(days=2), today + timedelta(days=16)))
-    if st.button("🔄 WYMUŚ ODŚWIEŻENIE"):
+    view_range = st.date_input("ZAKRES KALENDARZA:", value=(today - timedelta(days=2), today + timedelta(days=16)))
+    if st.button("🔄 POBIERZ ŚWIEŻE DANE"):
         st.session_state.main_df = get_data()
         st.rerun()
+    
     st.divider()
-    st.warning("Pamiętaj: Po edycji w tabeli kliknij przycisk ZAPISZ na samym dole.")
+    st.info("💡 Tip: Zapisuj co 15 minut, aby uniknąć utraty danych przy awarii przeglądarki.")
 
 start_v, end_v = view_range if isinstance(view_range, tuple) and len(view_range) == 2 else (today - timedelta(days=2), today + timedelta(days=16))
 
@@ -137,46 +132,57 @@ def draw_precision_gantt(df_to_plot, assets_to_list, height=600):
 # -----------------------------------------------------------------------------
 # 6. MENU I WIDOKI
 # -----------------------------------------------------------------------------
-tabs = list(RESOURCES.keys()) + ["🔧 EDYCJA I ZAPIS"]
+tabs = list(RESOURCES.keys()) + ["🔧 EDYCJA I PLANOWANIE"]
 active_tab = st.radio("MENU:", tabs, horizontal=True)
 st.divider()
 
 if active_tab in RESOURCES:
     group_assets = RESOURCES[active_tab]
-    icon = active_tab[0]
-    labels = [f"{icon} {a}" for a in group_assets]
+    labels = [f"{active_tab[0]} {a}" for a in group_assets]
     df_f = st.session_state.main_df[st.session_state.main_df['pojazd'].isin(group_assets)]
     st.plotly_chart(draw_precision_gantt(df_f, labels, height=len(labels)*65 + 100), use_container_width=True)
 
 else:
-    st.subheader("Panel Edycji i Bezpiecznego Zapisu")
-    search_q = st.text_input("🔍 SZUKAJ:", "").lower()
+    st.subheader("Panel Edycji i Bezpieczeństwa")
     
-    # Kopia danych do edycji
-    working_df = st.session_state.main_df.copy()
-    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        search_q = st.text_input("🔍 FILTRUJ ZASOBY (możesz edytować w filtrze):", "").lower()
+    with col2:
+        # EKSPORT DO EXCELA - KOPIA RATUNKOWA
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            st.session_state.main_df.to_excel(writer, index=False, sheet_name='Flota_SQM')
+        
+        st.download_button(
+            label="📥 POBIERZ KOPIĘ DO EXCELA (Zabezpiecz pracę)",
+            data=buffer,
+            file_name=f"SQM_LOGISTICS_BACKUP_{datetime.now().strftime('%H_%M')}.xlsx",
+            mime="application/vnd.ms-excel",
+            use_container_width=True
+        )
+
+    # Dane do wyświetlenia
     if search_q:
-        mask = working_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
-        display_df = working_df[mask]
+        mask = st.session_state.main_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
+        display_df = st.session_state.main_df[mask]
         current_labels = [l for l in ALL_ASSETS_ORDERED if search_q in l.lower()]
     else:
-        display_df = working_df
+        display_df = st.session_state.main_df
         current_labels = ALL_ASSETS_ORDERED
 
     with st.expander("📊 PODGLĄD GRAFICZNY", expanded=True):
         st.plotly_chart(draw_precision_gantt(display_df, current_labels, height=len(current_labels)*55 + 150), use_container_width=True)
 
     st.markdown("### ✏️ TABELA DANYCH")
-    CLEAN_LIST = [a for sub in RESOURCES.values() for a in sub]
     
-    # Ważne: data_editor musi dostać cały zestaw danych lub przemyślaną filtrację
-    edited_df = st.data_editor(
+    edited_part = st.data_editor(
         display_df,
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
         height=600,
-        key="editor_safe_v18",
+        key="editor_v20",
         column_config={
             "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=CLEAN_LIST, width=280, required=True),
             "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
@@ -187,38 +193,38 @@ else:
         }
     )
 
-    # PRZYCISK ZAPISU Z BLOKADĄ PUSTYCH DANYCH
-    if st.button("💾 ZAPISZ ZMIANY DO ARKUSZA", use_container_width=True, type="primary"):
-        if edited_df.empty and not st.session_state.main_df.empty:
-            st.error("UWAGA: Próba zapisu pustej tabeli! Operacja zablokowana dla bezpieczeństwa.")
-        else:
-            try:
-                # 1. Przygotowanie danych
-                final_to_save = edited_df.copy()
-                final_to_save = final_to_save[final_to_save['pojazd'] != ""] # usuń puste wiersze
-                
-                # 2. Konwersja dat na stringi dla GSheets
-                final_to_save['start'] = pd.to_datetime(final_to_save['start']).dt.strftime('%Y-%m-%d')
-                final_to_save['koniec'] = pd.to_datetime(final_to_save['koniec']).dt.strftime('%Y-%m-%d')
-                
-                # 3. Dopasowanie nazw kolumn do arkusza (Pojazd, EVENT, Start, Koniec, Kierowca, Notatka)
-                final_to_save.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-                
-                # 4. Krytyczny check
-                if len(final_to_save) == 0 and len(st.session_state.main_df) > 0:
-                    st.warning("Nie wykryto danych do zapisu. Jeśli chciałeś wyczyścić arkusz, zrób to ręcznie w Google Sheets.")
-                else:
-                    conn.update(data=final_to_save)
-                    st.session_state.main_df = get_data()
-                    st.success(f"✅ Pomyślnie zapisano {len(final_to_save)} wierszy!")
-                    st.balloons()
-                    st.rerun()
-            except Exception as e:
-                st.error(f"Krytyczny błąd zapisu: {e}")
+    # BEZPIECZNY ZAPIS
+    if st.button("💾 ZAPISZ ZMIANY W ARKUSZU GOOGLE", use_container_width=True, type="primary"):
+        try:
+            # Pobierz aktualny stan z Google, żeby nie usunąć tego, czego nie widzimy
+            full_current_db = get_data()
+            
+            # 1. Wycinamy z bazy te wiersze, które właśnie edytujemy
+            if search_q:
+                mask_to_keep = ~full_current_db.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
+                base_data = full_current_db[mask_to_keep]
+            else:
+                base_data = pd.DataFrame(columns=full_current_db.columns)
 
-# -----------------------------------------------------------------------------
-# 7. RECOVERY / DEBUG (Ukryte na dole)
-# -----------------------------------------------------------------------------
-with st.expander("🛠️ NARZĘDZIA RATUNKOWE (Tylko w przypadku problemów)"):
-    st.write("Ostatni stan w pamięci aplikacji:")
-    st.dataframe(st.session_state.main_df)
+            # 2. Dodajemy do nich to, co widać w tabeli (nową edycję)
+            final_df = pd.concat([base_data, edited_part], ignore_index=True)
+            
+            # 3. Czyszczenie
+            final_df = final_df[final_df['pojazd'] != ""].drop_duplicates()
+            
+            # 4. Formatowanie pod GSheets
+            final_df['start'] = pd.to_datetime(final_df['start']).dt.strftime('%Y-%m-%d')
+            final_df['koniec'] = pd.to_datetime(final_df['koniec']).dt.strftime('%Y-%m-%d')
+            final_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+
+            # 5. Blokada przed pustym zapisem
+            if final_df.empty and not full_current_db.empty:
+                st.error("Próba zapisu pustej tabeli! Operacja wstrzymana.")
+            else:
+                conn.update(data=final_df)
+                st.session_state.main_df = get_data()
+                st.success(f"Pomyślnie zapisano {len(final_df)} wpisów. Wszystkie dane (również te ukryte filtrem) są bezpieczne.")
+                st.balloons()
+                st.rerun()
+        except Exception as e:
+            st.error(f"Błąd krytyczny przy zapisie: {e}")
