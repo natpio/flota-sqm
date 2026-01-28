@@ -5,42 +5,33 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. SYSTEM LOGOWANIA (ZABEZPIECZENIE)
+# 1. SYSTEM LOGOWANIA (SECURITY LAYER)
 # -----------------------------------------------------------------------------
 def check_password():
-    """Zwraca True, jeśli użytkownik podał poprawne hasło."""
     def password_entered():
-        if st.session_state["password"] == "KOMORNIKISQM": 
+        if st.session_state["password"] == "SQM2026":
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Usuwamy hasło z sesji dla bezpieczeństwa
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        # Wyświetl formularz logowania
         st.markdown("<h2 style='text-align: center;'>SQM LOGISTICS | LOGOWANIE</h2>", unsafe_allow_html=True)
         st.text_input("Hasło dostępu:", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
-        # Błędne hasło
         st.text_input("Hasło dostępu:", type="password", on_change=password_entered, key="password")
         st.error("❌ Błędne hasło. Spróbuj ponownie.")
         return False
-    else:
-        # Hasło poprawne
-        return True
+    return True
 
 if not check_password():
-    st.stop()  # Wstrzymaj wykonywanie reszty kodu, jeśli nie zalogowano
+    st.stop()
 
 # -----------------------------------------------------------------------------
-# 2. KONFIGURACJA INTERFEJSU (BRAK SCROLLA, DUŻE CZCIONKI)
+# 2. KONFIGURACJA WIDOKU I STYLE CSS
 # -----------------------------------------------------------------------------
-st.set_page_config(
-    page_title="SQM LOGISTICS | Fleet Control",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="SQM LOGISTICS", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -52,9 +43,18 @@ st.markdown("""
         margin-bottom: 2rem; border-bottom: 10px solid #2563eb;
     }
 
+    /* POWIĘKSZENIE CZCIONEK I CZYTELNOŚĆ TABELI */
     [data-testid="stDataEditor"] div { font-size: 18px !important; }
-    button[data-baseweb="tab"] div p { font-size: 22px !important; font-weight: 900 !important; }
-
+    
+    /* Stylizacja menu wyboru zakładek (Radio jako Buttony) */
+    div[data-testid="stRadio"] > div {
+        background-color: #ffffff;
+        padding: 10px;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    /* Grube, widoczne suwaki dla logistyki */
     ::-webkit-scrollbar { width: 22px !important; height: 22px !important; }
     ::-webkit-scrollbar-track { background: #cbd5e1 !important; }
     ::-webkit-scrollbar-thumb { background: #2563eb !important; border-radius: 10px; border: 4px solid #cbd5e1 !important; }
@@ -62,12 +62,12 @@ st.markdown("""
     
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">System Zarządzania Zasobami v8.7</p>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">System Zarządzania Zasobami v8.8 (Fixed Focus Mode)</p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. DEFINICJA ZASOBÓW (TWOJA BAZA)
+# 3. BAZA ZASOBÓW SQM
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": [
@@ -95,28 +95,7 @@ RESOURCES = {
 ALL_ASSETS = [item for sublist in RESOURCES.values() for item in sublist]
 
 # -----------------------------------------------------------------------------
-# 4. FILTR DAT - ZAKRES WIDOKU (SIDEBAR)
-# -----------------------------------------------------------------------------
-with st.sidebar:
-    st.header("⚙️ USTAWIENIA WIDOKU")
-    today = datetime.now()
-    
-    view_range = st.date_input(
-        "Wybierz zakres dat:",
-        value=(today - timedelta(days=2), today + timedelta(days=21))
-    )
-    
-    if st.button("WYLOGUJ"):
-        st.session_state["password_correct"] = False
-        st.rerun()
-
-if isinstance(view_range, tuple) and len(view_range) == 2:
-    start_v, end_v = view_range
-else:
-    start_v, end_v = today - timedelta(days=2), today + timedelta(days=21)
-
-# -----------------------------------------------------------------------------
-# 5. LOGIKA DANYCH (INTEGRACJA)
+# 4. KOMUNIKACJA Z DANYMI
 # -----------------------------------------------------------------------------
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -127,6 +106,7 @@ def get_data():
         raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
         raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
         
+        # Tworzenie stałego szkieletu widoku
         skeleton = pd.DataFrame({'pojazd': ALL_ASSETS})
         merged = pd.merge(skeleton, raw, on='pojazd', how='outer')
         merged = merged[merged['pojazd'].isin(ALL_ASSETS)]
@@ -137,36 +117,76 @@ def get_data():
 df = get_data()
 
 # -----------------------------------------------------------------------------
-# 6. HARMONOGRAMY (GANTT)
+# 5. PANEL STEROWANIA (SIDEBAR)
 # -----------------------------------------------------------------------------
-tabs = st.tabs(list(RESOURCES.keys()) + ["🔧 EDYCJA / ARKUSZ"])
-
-for i, (cat, assets) in enumerate(RESOURCES.items()):
-    with tabs[i]:
-        plot_df = df[(df['pojazd'].isin(assets)) & (df['start'] != "")].copy()
-        
-        if not plot_df.empty:
-            fig = px.timeline(
-                plot_df, x_start="start", x_end="koniec", y="pojazd",
-                color="event", text="event", 
-                category_orders={"pojazd": assets}, 
-                template="plotly_white",
-                color_discrete_sequence=px.colors.qualitative.Dark24
-            )
-            fig.update_xaxes(side="top", range=[start_v, end_v], tickformat="%d\n%b", tickfont=dict(size=16, weight='bold'))
-            fig.update_yaxes(title="", tickfont=dict(size=16, weight='bold'))
-            fig.update_layout(height=max(400, len(assets)*55 + 100), showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
-            fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
-            st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-        else:
-            st.info(f"Brak zaplanowanych projektów dla: {cat}")
-
-# -----------------------------------------------------------------------------
-# 7. EDYCJA
-# -----------------------------------------------------------------------------
-with tabs[-1]:
-    st.subheader("Główny Panel Zarządzania Zasobami")
+with st.sidebar:
+    st.header("⚙️ USTAWIENIA")
+    today = datetime.now()
+    view_range = st.date_input(
+        "ZAKRES DAT:",
+        value=(today - timedelta(days=2), today + timedelta(days=21))
+    )
     
+    st.divider()
+    if st.button("WYLOGUJ"):
+        st.session_state["password_correct"] = False
+        st.rerun()
+
+if isinstance(view_range, tuple) and len(view_range) == 2:
+    start_v, end_v = view_range
+else:
+    start_v, end_v = today - timedelta(days=2), today + timedelta(days=21)
+
+# -----------------------------------------------------------------------------
+# 6. LOGIKA ZAKŁADEK (ZAPOBIEGANIE PRZESKAKIWANIU)
+# -----------------------------------------------------------------------------
+tab_titles = list(RESOURCES.keys()) + ["🔧 EDYCJA / ARKUSZ"]
+
+# Jeśli aplikacja się przeładowuje, odczytaj zapamiętaną zakładkę
+if "active_tab_index" not in st.session_state:
+    st.session_state["active_tab_index"] = 0
+
+# Selector jako radio stylizowany na menu - to on trzyma fokus
+active_tab = st.radio(
+    "NAWIGACJA:", 
+    tab_titles, 
+    index=st.session_state["active_tab_index"],
+    horizontal=True,
+    key="navigation_radio"
+)
+
+# Aktualizacja indeksu w sesji po zmianie
+st.session_state["active_tab_index"] = tab_titles.index(active_tab)
+
+st.divider()
+
+# -----------------------------------------------------------------------------
+# 7. RENDEROWANIE TREŚCI
+# -----------------------------------------------------------------------------
+if active_tab in RESOURCES:
+    assets_to_show = RESOURCES[active_tab]
+    plot_df = df[(df['pojazd'].isin(assets_to_show)) & (df['start'] != "")].copy()
+    
+    if not plot_df.empty:
+        fig = px.timeline(
+            plot_df, x_start="start", x_end="koniec", y="pojazd",
+            color="event", text="event", 
+            category_orders={"pojazd": assets_to_show}, 
+            template="plotly_white",
+            color_discrete_sequence=px.colors.qualitative.Dark24
+        )
+        fig.update_xaxes(side="top", range=[start_v, end_v], tickformat="%d\n%b", tickfont=dict(size=16, weight='bold'))
+        fig.update_yaxes(title="", tickfont=dict(size=16, weight='bold'))
+        fig.update_layout(height=max(400, len(assets_to_show)*55 + 100), showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
+        fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    else:
+        st.info(f"Brak przypisanych zadań dla kategorii: {active_tab}")
+
+elif active_tab == "🔧 EDYCJA / ARKUSZ":
+    st.subheader("Główny Panel Edycji Harmonogramu")
+    
+    # Edytor danych - teraz po zmianie komórki st.rerun() nie wyrzuci Cię do pierwszej zakładki
     edited_df = st.data_editor(
         df,
         num_rows="dynamic",
@@ -183,11 +203,12 @@ with tabs[-1]:
         }
     )
 
-    if st.button("💾 ZAPISZ WSZYSTKO DO ARKUSZA", use_container_width=True):
-        save_df = edited_df[edited_df['event'] != ""].copy()
-        save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
-        save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
-        save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
-        conn.update(data=save_df)
-        st.success("Zapis zakończony!")
-        st.rerun()
+    if st.button("💾 ZAPISZ ZMIANY W CHMURZE", use_container_width=True):
+        with st.status("Trwa zapisywanie..."):
+            save_df = edited_df[edited_df['event'] != ""].copy()
+            save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
+            save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
+            save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
+            conn.update(data=save_df)
+            st.success("Synchronizacja zakończona!")
+            st.rerun()
