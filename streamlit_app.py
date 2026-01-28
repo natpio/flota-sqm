@@ -1,7 +1,7 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
@@ -49,7 +49,7 @@ st.markdown("""
     </style>
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.3 (Force Annotation Mode)</p>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v9.4 (Bulletproof Text Mode)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -108,7 +108,7 @@ st.session_state["active_tab_index"] = tab_titles.index(active_tab)
 st.divider()
 
 # -----------------------------------------------------------------------------
-# 6. GENEROWANIE WYKRESU (NOWA METODA ADNOTACJI)
+# 6. GENEROWANIE WYKRESU (METODA GO.BAR - NAJBARDZIEJ STABILNA)
 # -----------------------------------------------------------------------------
 if active_tab in RESOURCES:
     assets_to_show = RESOURCES[active_tab]
@@ -116,40 +116,47 @@ if active_tab in RESOURCES:
     plot_df = plot_df[plot_df['start'] != ""].copy()
     
     if not plot_df.empty:
-        # Tworzymy bazę wykresu bez tekstu w traces
-        fig = px.timeline(
-            plot_df, x_start="start", x_end="koniec", y="pojazd",
-            color="event",
-            category_orders={"pojazd": assets_to_show}, 
-            template="plotly_white",
-            color_discrete_sequence=px.colors.qualitative.Prism
-        )
-        
-        # DODAWANIE ADNOTACJI (Ręczne wymuszenie tekstu na każdym pasku)
-        annotations = []
-        for i, row in plot_df.iterrows():
-            # Obliczamy środek paska dla tekstu
-            mid_point = row['start'] + (row['koniec'] - row['start']) / 2
-            annotations.append(dict(
-                x=mid_point,
-                y=row['pojazd'],
-                text=f"<b>{row['event']}</b>",
-                showarrow=False,
-                font=dict(size=14, color="white"),
-                xanchor='center',
-                yanchor='middle'
+        fig = go.Figure()
+
+        # Ręcznie dodajemy każdy projekt jako pasek, aby wymusić tekst
+        for event_name, group in plot_df.groupby('event'):
+            # Obliczamy czas trwania (width) dla go.Bar
+            widths = (group['koniec'] - group['start']).dt.total_seconds() * 1000
+            
+            fig.add_trace(go.Bar(
+                y=group['pojazd'],
+                x=widths,
+                base=group['start'],
+                orientation='h',
+                name=event_name,
+                text=group['event'],
+                textposition='inside',
+                insidetextanchor='start',
+                textfont=dict(size=14, color='white', family="Inter"),
+                constraintext='none', # WYMUSZA brak znikania tekstu
+                hovertemplate="<b>%{y}</b><br>Projekt: %{text}<br>Start: %{base|%d %b}<extra></extra>"
             ))
 
         fig.update_layout(
-            annotations=annotations,
-            height=max(500, len(assets_to_show)*60 + 100), 
-            showlegend=False, 
+            barmode='overlay',
+            height=max(500, len(assets_to_show)*60 + 100),
+            showlegend=False,
+            template="plotly_white",
             margin=dict(l=10, r=20, t=50, b=10),
-            bargap=0.4
+            xaxis=dict(
+                type='date',
+                range=[start_v, end_v],
+                side='top',
+                tickformat="%d\n%b",
+                tickfont=dict(size=16, weight='bold')
+            ),
+            yaxis=dict(
+                categoryorder='array',
+                categoryarray=assets_to_show[::-1], # Odwrócenie kolejności by pasowało do listy
+                tickfont=dict(size=14, weight='bold')
+            )
         )
         
-        fig.update_xaxes(side="top", range=[start_v, end_v], tickformat="%d\n%b", tickfont=dict(size=16, weight='bold'))
-        fig.update_yaxes(title="", tickfont=dict(size=14, weight='bold'), autorange="reversed")
         fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
         
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
