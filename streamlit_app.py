@@ -5,7 +5,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # -----------------------------------------------------------------------------
-# 1. SYSTEM LOGOWANIA (SECURITY LAYER)
+# 1. SYSTEM LOGOWANIA (ZABEZPIECZENIE DOSTĘPU)
 # -----------------------------------------------------------------------------
 def check_password():
     def password_entered():
@@ -29,7 +29,7 @@ if not check_password():
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 2. KONFIGURACJA WIDOKU I STYLE CSS
+# 2. KONFIGURACJA WIDOKU I STYLE CSS (ULTRA-CZYTELNOŚĆ)
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="SQM LOGISTICS", layout="wide", initial_sidebar_state="expanded")
 
@@ -43,10 +43,10 @@ st.markdown("""
         margin-bottom: 2rem; border-bottom: 10px solid #2563eb;
     }
 
-    /* POWIĘKSZENIE CZCIONEK I CZYTELNOŚĆ TABELI */
+    /* POWIĘKSZENIE CZCIONEK DLA WYGODY PLANOWANIA */
     [data-testid="stDataEditor"] div { font-size: 18px !important; }
     
-    /* Stylizacja menu wyboru zakładek (Radio jako Buttony) */
+    /* Stylizacja menu nawigacji */
     div[data-testid="stRadio"] > div {
         background-color: #ffffff;
         padding: 10px;
@@ -54,7 +54,7 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     
-    /* Grube, widoczne suwaki dla logistyki */
+    /* Grube, widoczne suwaki - kluczowe przy długich listach aut */
     ::-webkit-scrollbar { width: 22px !important; height: 22px !important; }
     ::-webkit-scrollbar-track { background: #cbd5e1 !important; }
     ::-webkit-scrollbar-thumb { background: #2563eb !important; border-radius: 10px; border: 4px solid #cbd5e1 !important; }
@@ -62,12 +62,12 @@ st.markdown("""
     
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 3.5rem; letter-spacing: -3px; line-height: 1;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">System Zarządzania Zasobami v8.8 (Fixed Focus Mode)</p>
+        <p style="margin:0; opacity:0.8; font-size: 1.2rem;">Fleet Manager v8.9 (Always Visible Labels)</p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. BAZA ZASOBÓW SQM
+# 3. PEŁNA BAZA ZASOBÓW SQM
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": [
@@ -95,7 +95,7 @@ RESOURCES = {
 ALL_ASSETS = [item for sublist in RESOURCES.values() for item in sublist]
 
 # -----------------------------------------------------------------------------
-# 4. KOMUNIKACJA Z DANYMI
+# 4. KOMUNIKACJA Z GOOGLE SHEETS
 # -----------------------------------------------------------------------------
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -106,7 +106,7 @@ def get_data():
         raw['start'] = pd.to_datetime(raw['start'], errors='coerce')
         raw['koniec'] = pd.to_datetime(raw['koniec'], errors='coerce')
         
-        # Tworzenie stałego szkieletu widoku
+        # Skeleton zapewnia, że auta bez projektów też są widoczne w edycji
         skeleton = pd.DataFrame({'pojazd': ALL_ASSETS})
         merged = pd.merge(skeleton, raw, on='pojazd', how='outer')
         merged = merged[merged['pojazd'].isin(ALL_ASSETS)]
@@ -117,13 +117,13 @@ def get_data():
 df = get_data()
 
 # -----------------------------------------------------------------------------
-# 5. PANEL STEROWANIA (SIDEBAR)
+# 5. SIDEBAR - USTAWIENIA ZAKRESU
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ USTAWIENIA")
+    st.header("⚙️ USTAWIENIA WIDOKU")
     today = datetime.now()
     view_range = st.date_input(
-        "ZAKRES DAT:",
+        "ZAKRES DAT NA WYKRESIE:",
         value=(today - timedelta(days=2), today + timedelta(days=21))
     )
     
@@ -138,24 +138,20 @@ else:
     start_v, end_v = today - timedelta(days=2), today + timedelta(days=21)
 
 # -----------------------------------------------------------------------------
-# 6. LOGIKA ZAKŁADEK (ZAPOBIEGANIE PRZESKAKIWANIU)
+# 6. LOGIKA NAWIGACJI (STABILNE ZAKŁADKI)
 # -----------------------------------------------------------------------------
 tab_titles = list(RESOURCES.keys()) + ["🔧 EDYCJA / ARKUSZ"]
 
-# Jeśli aplikacja się przeładowuje, odczytaj zapamiętaną zakładkę
 if "active_tab_index" not in st.session_state:
     st.session_state["active_tab_index"] = 0
 
-# Selector jako radio stylizowany na menu - to on trzyma fokus
 active_tab = st.radio(
-    "NAWIGACJA:", 
+    "NAWIGACJA PO KATEGORIACH:", 
     tab_titles, 
     index=st.session_state["active_tab_index"],
     horizontal=True,
     key="navigation_radio"
 )
-
-# Aktualizacja indeksu w sesji po zmianie
 st.session_state["active_tab_index"] = tab_titles.index(active_tab)
 
 st.divider()
@@ -175,18 +171,27 @@ if active_tab in RESOURCES:
             template="plotly_white",
             color_discrete_sequence=px.colors.qualitative.Dark24
         )
+        
+        # WYMUSZENIE WIDOCZNOŚCI NAZW EVENTÓW (nawet dla krótkich pasków)
+        fig.update_traces(
+            textposition="auto", 
+            insidetextanchor="middle",
+            textfont_size=14,
+            textfont_weight="bold",
+            cliponaxis=False 
+        )
+        
         fig.update_xaxes(side="top", range=[start_v, end_v], tickformat="%d\n%b", tickfont=dict(size=16, weight='bold'))
         fig.update_yaxes(title="", tickfont=dict(size=16, weight='bold'))
         fig.update_layout(height=max(400, len(assets_to_show)*55 + 100), showlegend=False, margin=dict(l=10, r=10, t=50, b=10))
         fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
     else:
-        st.info(f"Brak przypisanych zadań dla kategorii: {active_tab}")
+        st.info(f"Brak zaplanowanych projektów dla kategorii: {active_tab}")
 
 elif active_tab == "🔧 EDYCJA / ARKUSZ":
-    st.subheader("Główny Panel Edycji Harmonogramu")
+    st.subheader("Główny Panel Zarządzania Harmonogramem")
     
-    # Edytor danych - teraz po zmianie komórki st.rerun() nie wyrzuci Cię do pierwszej zakładki
     edited_df = st.data_editor(
         df,
         num_rows="dynamic",
@@ -204,11 +209,11 @@ elif active_tab == "🔧 EDYCJA / ARKUSZ":
     )
 
     if st.button("💾 ZAPISZ ZMIANY W CHMURZE", use_container_width=True):
-        with st.status("Trwa zapisywanie..."):
+        with st.status("Trwa synchronizacja z Google Sheets..."):
             save_df = edited_df[edited_df['event'] != ""].copy()
             save_df.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
             save_df['Start'] = pd.to_datetime(save_df['Start']).dt.strftime('%Y-%m-%d')
             save_df['Koniec'] = pd.to_datetime(save_df['Koniec']).dt.strftime('%Y-%m-%d')
             conn.update(data=save_df)
-            st.success("Synchronizacja zakończona!")
+            st.success("Synchronizacja zakończona pomyślnie!")
             st.rerun()
