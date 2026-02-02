@@ -29,27 +29,82 @@ if not check_password():
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 2. KONFIGURACJA I STYLE
+# 2. KONFIGURACJA I STYLE (DYNAMICZNE)
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="SQM LOGISTICS", layout="wide", initial_sidebar_state="expanded")
 
-st.markdown("""
+# Inicjalizacja trybu ciemnego w sesji
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = False
+
+# Sidebar - przełącznik trybu
+with st.sidebar:
+    st.header("USTAWIENIA")
+    theme_choice = st.toggle("TRYB CIEMNY", value=st.session_state.dark_mode)
+    if theme_choice != st.session_state.dark_mode:
+        st.session_state.dark_mode = theme_choice
+        st.rerun()
+
+# Definicja kolorów zależna od trybu
+if st.session_state.dark_mode:
+    bg_color = "#0f172a"
+    text_color = "#f8fafc"
+    header_bg = "#1e293b"
+    card_bg = "#1e293b"
+    grid_color = "#334155"
+    plotly_template = "plotly_dark"
+    conflict_bg = "#450a0a"
+    conflict_border = "#f87171"
+    conflict_text = "#fecaca"
+else:
+    bg_color = "#f8fafc"
+    text_color = "#0f172a"
+    header_bg = "#0f172a" # Nagłówek SQM tradycyjnie ciemny
+    card_bg = "#ffffff"
+    grid_color = "#cbd5e1"
+    plotly_template = "plotly_white"
+    conflict_bg = "#fee2e2"
+    conflict_border = "#ef4444"
+    conflict_text = "#b91c1c"
+
+st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@700;900&display=swap');
-    .stApp { background-color: #f8fafc; font-family: 'Inter', sans-serif; }
-    .sqm-header {
-        background: #0f172a; padding: 1.5rem; border-radius: 12px; color: white;
-        margin-bottom: 1.5rem; border-left: 8px solid #2563eb;
-    }
-    [data-testid="stDataEditor"] div { font-size: 16px !important; }
-    .conflict-box {
-        background-color: #fee2e2; border: 2px solid #ef4444; padding: 1rem;
-        border-radius: 8px; color: #b91c1c; margin-bottom: 1rem; font-weight: bold;
-    }
+    
+    .stApp {{ 
+        background-color: {bg_color}; 
+        color: {text_color};
+        font-family: 'Inter', sans-serif; 
+    }}
+    
+    .sqm-header {{
+        background: {header_bg}; 
+        padding: 1.5rem; 
+        border-radius: 12px; 
+        color: white;
+        margin-bottom: 1.5rem; 
+        border-left: 8px solid #2563eb;
+    }}
+    
+    [data-testid="stDataEditor"] div {{ font-size: 16px !important; }}
+    
+    .conflict-box {{
+        background-color: {conflict_bg}; 
+        border: 2px solid {conflict_border}; 
+        padding: 1rem;
+        border-radius: 8px; 
+        color: {conflict_text}; 
+        margin-bottom: 1rem; 
+        font-weight: bold;
+    }}
+    
+    /* Naprawa kolorów tekstu w widgetach dla trybu ciemnego */
+    .stMarkdown, .stText {{ color: {text_color}; }}
     </style>
+    
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 2.8rem; letter-spacing: -2px;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v28.0 (Safety & Precision)</p>
+        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v29.0 (Adaptive UI)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -88,24 +143,25 @@ if "main_df" not in st.session_state:
     st.session_state.main_df = get_data()
 
 # -----------------------------------------------------------------------------
-# 4. SIDEBAR
+# 4. SIDEBAR (CIĄG DALSZY)
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.header("PLANOWANIE")
     today = datetime.now()
     view_range = st.date_input("ZAKRES CZASU:", value=(today - timedelta(days=2), today + timedelta(days=16)))
-    if st.button("🔄 ODŚWIEŻ"):
+    if st.button("🔄 ODŚWIEŻ DANE"):
         st.session_state.main_df = get_data()
         st.rerun()
 
 start_v, end_v = view_range if isinstance(view_range, tuple) and len(view_range) == 2 else (today - timedelta(days=2), today + timedelta(days=16))
 
 # -----------------------------------------------------------------------------
-# 5. FUNKCJA WYKRESU
+# 5. FUNKCJA WYKRESU (Z UWZGLĘDNIENIEM TRYBU)
 # -----------------------------------------------------------------------------
 def draw_precision_gantt(df_to_plot, assets_to_list, height=600):
     fig = go.Figure()
-    fig.add_trace(go.Scatter(y=assets_to_list, x=[None]*len(assets_to_list), showlegend=False, cliponaxis=False))
+    # Pusta seria dla zachowania osi Y
+    fig.add_trace(go.Scatter(y=assets_to_list, x=[None]*len(assets_to_list), showlegend=False))
 
     clean_plot = df_to_plot[df_to_plot['start'].notnull()].copy()
     if not clean_plot.empty:
@@ -122,12 +178,22 @@ def draw_precision_gantt(df_to_plot, assets_to_list, height=600):
             ))
     
     fig.update_layout(
-        barmode='overlay', height=height, showlegend=False, template="plotly_white",
+        barmode='overlay', height=height, showlegend=False, 
+        template=plotly_template,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=20, r=20, t=60, b=20),
-        xaxis=dict(type='date', range=[start_v, end_v], side='top', tickformat="%d\n%b", 
-                   tickfont=dict(size=15, weight='bold', color="#1e293b"), showgrid=True, gridcolor='#cbd5e1', dtick="D1"),
-        yaxis=dict(categoryorder='array', categoryarray=assets_to_list[::-1], automargin=True, 
-                   tickfont=dict(size=16, weight='bold', color="#0f172a"), fixedrange=True, showgrid=True, gridcolor='#f1f5f9')
+        xaxis=dict(
+            type='date', range=[start_v, end_v], side='top', tickformat="%d\n%b", 
+            tickfont=dict(size=15, weight='bold', color=text_color), 
+            showgrid=True, gridcolor=grid_color, dtick="D1"
+        ),
+        yaxis=dict(
+            categoryorder='array', categoryarray=assets_to_list[::-1], 
+            automargin=True, 
+            tickfont=dict(size=16, weight='bold', color=text_color), 
+            fixedrange=True, showgrid=True, gridcolor=grid_color
+        )
     )
     fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
     return fig
@@ -150,12 +216,9 @@ else:
     st.subheader("Planowanie i Edycja")
     search_q = st.text_input("🔍 SZUKAJ POJAZDU LUB PROJEKTU:", "").lower()
     
-    # Dane do wyświetlenia (filtrowane)
     if search_q:
         mask = st.session_state.main_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
         display_df = st.session_state.main_df[mask].copy()
-        current_labels = [l for l in ALL_ASSETS_ORDERED if any(word in l.lower() for word in search_q.split()) or any(word in str(display_df['event']).lower() for word in search_q.split())]
-        # Uproszczone mapowanie etykiet dla wyszukiwania
         current_labels = [f"{ASSET_TO_CAT_ICON.get(p, '•')} {p}" for p in display_df['pojazd'].unique()]
     else:
         display_df = st.session_state.main_df.copy()
@@ -174,7 +237,7 @@ else:
         use_container_width=True,
         hide_index=True,
         height=500,
-        key="editor_v28",
+        key="editor_v29",
         column_config={
             "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=CLEAN_LIST, width=280, required=True),
             "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
@@ -185,9 +248,8 @@ else:
         }
     )
 
-    # --- LOGIKA KOLIZJI (Collision Guard) ---
+    # --- LOGIKA KOLIZJI ---
     conflicts = []
-    # Sprawdzamy kolizje na podstawie edytowanej tabeli
     check_df = edited_df.dropna(subset=['pojazd', 'start', 'koniec']).copy()
     check_df['start'] = pd.to_datetime(check_df['start'])
     check_df['koniec'] = pd.to_datetime(check_df['koniec'])
@@ -207,29 +269,20 @@ else:
             st.write(c)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- LOGIKA ZAPISU (Smart Merge) ---
+    # --- ZAPIS ---
     if st.button("💾 ZAPISZ ZMIANY", use_container_width=True):
-        # 1. Pobierz świeże dane z bazy, aby mieć to, czego nie widzimy (odfiltrowane)
         full_current_db = get_data()
-        
-        # 2. Usuń z pełnej bazy te wiersze, które właśnie edytowaliśmy (identyfikacja po filtrze)
         if search_q:
             mask_to_keep = ~full_current_db.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
             remaining_data = full_current_db[mask_to_keep]
-            # 3. Połącz nienaruszone dane z nowymi wyedytowanymi
             final_to_save = pd.concat([remaining_data, edited_df], ignore_index=True)
         else:
             final_to_save = edited_df
 
-        # Czyszczenie przed wysyłką
         final_to_save = final_to_save.dropna(subset=['pojazd'])
         final_to_save = final_to_save[final_to_save['event'] != ""]
-        
-        # Formatowanie dat pod Google Sheets
         final_to_save['start'] = pd.to_datetime(final_to_save['start']).dt.strftime('%Y-%m-%d')
         final_to_save['koniec'] = pd.to_datetime(final_to_save['koniec']).dt.strftime('%Y-%m-%d')
-        
-        # Mapowanie nazw kolumn na identyczne z arkuszem
         final_to_save.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
         
         conn.update(data=final_to_save)
