@@ -29,56 +29,40 @@ if not check_password():
     st.stop()
 
 # -----------------------------------------------------------------------------
-# 2. KONFIGURACJA I STYLE (DYNAMICZNE)
+# 2. KONFIGURACJA I STYLE (ADAPTACYJNE)
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="SQM LOGISTICS", layout="wide", initial_sidebar_state="expanded")
 
-# Inicjalizacja trybu ciemnego w sesji
+# Inicjalizacja wyboru trybu dla wykresów w sesji
 if "dark_mode" not in st.session_state:
     st.session_state.dark_mode = False
 
-# Sidebar - przełącznik trybu
 with st.sidebar:
-    st.header("USTAWIENIA")
-    theme_choice = st.toggle("TRYB CIEMNY", value=st.session_state.dark_mode)
-    if theme_choice != st.session_state.dark_mode:
-        st.session_state.dark_mode = theme_choice
-        st.rerun()
+    st.header("WIZUALIZACJA")
+    # Przełącznik trybu (wpływa na wykresy i detale CSS)
+    st.session_state.dark_mode = st.toggle("TRYB CIEMNY (WYKRESY)", value=st.session_state.dark_mode)
+    st.divider()
 
-# Definicja kolorów zależna od trybu
+# Definicja parametrów wizualnych
 if st.session_state.dark_mode:
-    bg_color = "#0f172a"
-    text_color = "#f8fafc"
-    header_bg = "#1e293b"
-    card_bg = "#1e293b"
-    grid_color = "#334155"
     plotly_template = "plotly_dark"
-    conflict_bg = "#450a0a"
-    conflict_border = "#f87171"
-    conflict_text = "#fecaca"
+    text_color = "#f8fafc"
+    grid_color = "#334155"
+    conflict_bg = "rgba(220, 38, 38, 0.2)"
 else:
-    bg_color = "#f8fafc"
-    text_color = "#0f172a"
-    header_bg = "#0f172a" # Nagłówek SQM tradycyjnie ciemny
-    card_bg = "#ffffff"
-    grid_color = "#cbd5e1"
     plotly_template = "plotly_white"
-    conflict_bg = "#fee2e2"
-    conflict_border = "#ef4444"
-    conflict_text = "#b91c1c"
+    text_color = "#0f172a"
+    grid_color = "#cbd5e1"
+    conflict_bg = "rgba(254, 226, 226, 0.8)"
 
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@700;900&display=swap');
     
-    .stApp {{ 
-        background-color: {bg_color}; 
-        color: {text_color};
-        font-family: 'Inter', sans-serif; 
-    }}
+    .stApp {{ font-family: 'Inter', sans-serif; }}
     
     .sqm-header {{
-        background: {header_bg}; 
+        background: #0f172a; 
         padding: 1.5rem; 
         border-radius: 12px; 
         color: white;
@@ -90,26 +74,23 @@ st.markdown(f"""
     
     .conflict-box {{
         background-color: {conflict_bg}; 
-        border: 2px solid {conflict_border}; 
+        border: 2px solid #ef4444; 
         padding: 1rem;
         border-radius: 8px; 
-        color: {conflict_text}; 
+        color: #ef4444; 
         margin-bottom: 1rem; 
         font-weight: bold;
     }}
-    
-    /* Naprawa kolorów tekstu w widgetach dla trybu ciemnego */
-    .stMarkdown, .stText {{ color: {text_color}; }}
     </style>
     
     <div class="sqm-header">
         <h1 style="margin:0; font-size: 2.8rem; letter-spacing: -2px;">SQM LOGISTICS</h1>
-        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v29.0 (Adaptive UI)</p>
+        <p style="margin:0; opacity:0.7; font-size: 1rem;">Fleet Management v31.0 (Safety & Precision)</p>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. ZASOBY
+# 3. ZASOBY I DANE
 # -----------------------------------------------------------------------------
 RESOURCES = {
     "🚛 CIĘŻAROWE": ["31 -TIR PZ1V388/PZ2K300 STABLEWSKI", "TIR 2 - WZ654FT/PZ2H972 KOGUS", "TIR 3- PNT3530A/PZ4U343 DANIELAK", "44 - SOLO PY 73262", "45 - PY1541M + przyczepa", "SPEDYCJA", "AUTO RENTAL"],
@@ -143,24 +124,24 @@ if "main_df" not in st.session_state:
     st.session_state.main_df = get_data()
 
 # -----------------------------------------------------------------------------
-# 4. SIDEBAR (CIĄG DALSZY)
+# 4. SIDEBAR - FILTRY
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.header("PLANOWANIE")
     today = datetime.now()
     view_range = st.date_input("ZAKRES CZASU:", value=(today - timedelta(days=2), today + timedelta(days=16)))
-    if st.button("🔄 ODŚWIEŻ DANE"):
+    if st.button("🔄 ODŚWIEŻ Z BAZY"):
         st.session_state.main_df = get_data()
         st.rerun()
 
 start_v, end_v = view_range if isinstance(view_range, tuple) and len(view_range) == 2 else (today - timedelta(days=2), today + timedelta(days=16))
 
 # -----------------------------------------------------------------------------
-# 5. FUNKCJA WYKRESU (Z UWZGLĘDNIENIEM TRYBU)
+# 5. FUNKCJA WYKRESU (DYNAMICZNA)
 # -----------------------------------------------------------------------------
 def draw_precision_gantt(df_to_plot, assets_to_list, height=600):
     fig = go.Figure()
-    # Pusta seria dla zachowania osi Y
+    # Zapewnienie stałej listy pojazdów na osi Y
     fig.add_trace(go.Scatter(y=assets_to_list, x=[None]*len(assets_to_list), showlegend=False))
 
     clean_plot = df_to_plot[df_to_plot['start'].notnull()].copy()
@@ -172,7 +153,7 @@ def draw_precision_gantt(df_to_plot, assets_to_list, height=600):
                 y=group['y_label'], x=dur, base=group['start'],
                 orientation='h', name=ev, text=group['event'],
                 textposition='inside', insidetextanchor='start',
-                textfont=dict(size=14, color='white', family="Inter"),
+                textfont=dict(size=14, color='white'),
                 marker=dict(line=dict(width=1, color='rgba(255,255,255,0.3)')),
                 hovertemplate="<b>%{y}</b><br>%{text}<extra></extra>"
             ))
@@ -180,7 +161,7 @@ def draw_precision_gantt(df_to_plot, assets_to_list, height=600):
     fig.update_layout(
         barmode='overlay', height=height, showlegend=False, 
         template=plotly_template,
-        paper_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)', 
         plot_bgcolor='rgba(0,0,0,0)',
         margin=dict(l=20, r=20, t=60, b=20),
         xaxis=dict(
@@ -195,14 +176,15 @@ def draw_precision_gantt(df_to_plot, assets_to_list, height=600):
             fixedrange=True, showgrid=True, gridcolor=grid_color
         )
     )
+    # Linia "Dzisiaj"
     fig.add_vline(x=today.timestamp()*1000, line_width=4, line_color="#ef4444")
     return fig
 
 # -----------------------------------------------------------------------------
-# 6. WIDOKI
+# 6. MODUŁY I ZAKŁADKI
 # -----------------------------------------------------------------------------
 tabs = list(RESOURCES.keys()) + ["🔧 EDYCJA I PLANOWANIE"]
-active_tab = st.radio("MENU:", tabs, horizontal=True)
+active_tab = st.radio("MENU ZASOBÓW:", tabs, horizontal=True)
 st.divider()
 
 if active_tab in RESOURCES:
@@ -213,8 +195,8 @@ if active_tab in RESOURCES:
     st.plotly_chart(draw_precision_gantt(df_f, labels, height=len(labels)*65 + 100), use_container_width=True)
 
 else:
-    st.subheader("Planowanie i Edycja")
-    search_q = st.text_input("🔍 SZUKAJ POJAZDU LUB PROJEKTU:", "").lower()
+    st.subheader("Konsola Planowania")
+    search_q = st.text_input("🔍 SZUKAJ POJAZDU, PROJEKTU LUB KIEROWCY:", "").lower()
     
     if search_q:
         mask = st.session_state.main_df.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
@@ -224,11 +206,11 @@ else:
         display_df = st.session_state.main_df.copy()
         current_labels = ALL_ASSETS_ORDERED
 
-    with st.expander("📊 PODGLĄD GRAFICZNY (WYSOKA CZYTELNOŚĆ)", expanded=True):
+    with st.expander("📊 PODGLĄD HARMONOGRAMU", expanded=True):
         if not display_df.empty:
             st.plotly_chart(draw_precision_gantt(display_df, current_labels, height=len(current_labels)*55 + 150), use_container_width=True)
 
-    st.markdown("### ✏️ TABELA DANYCH")
+    st.markdown("### ✏️ MODYFIKACJA DANYCH")
     CLEAN_LIST = [a for sub in RESOURCES.values() for a in sub]
     
     edited_df = st.data_editor(
@@ -237,7 +219,7 @@ else:
         use_container_width=True,
         hide_index=True,
         height=500,
-        key="editor_v29",
+        key="editor_v31",
         column_config={
             "pojazd": st.column_config.SelectboxColumn("🚛 ZASÓB", options=CLEAN_LIST, width=280, required=True),
             "event": st.column_config.TextColumn("📋 PROJEKT", width=180),
@@ -248,7 +230,7 @@ else:
         }
     )
 
-    # --- LOGIKA KOLIZJI ---
+    # --- WALIDACJA KOLIZJI ---
     conflicts = []
     check_df = edited_df.dropna(subset=['pojazd', 'start', 'koniec']).copy()
     check_df['start'] = pd.to_datetime(check_df['start'])
@@ -261,7 +243,7 @@ else:
             for i in range(len(recs)-1):
                 for j in range(i+1, len(recs)):
                     if recs[i]['start'] < recs[j]['koniec'] and recs[j]['start'] < recs[i]['koniec']:
-                        conflicts.append(f"⚠️ KOLIZJA: {auto} nakłada się w projektach: {recs[i]['event']} oraz {recs[j]['event']}")
+                        conflicts.append(f"⚠️ KOLIZJA: {auto} -> {recs[i]['event']} / {recs[j]['event']}")
 
     if conflicts:
         st.markdown('<div class="conflict-box">', unsafe_allow_html=True)
@@ -270,8 +252,10 @@ else:
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- ZAPIS ---
-    if st.button("💾 ZAPISZ ZMIANY", use_container_width=True):
+    if st.button("💾 ZAPISZ I SYNCHRONIZUJ", use_container_width=True):
         full_current_db = get_data()
+        
+        # Merge danych (zachowuje to, co ukryte przez filtr wyszukiwania)
         if search_q:
             mask_to_keep = ~full_current_db.astype(str).apply(lambda x: x.str.lower().str.contains(search_q).any(), axis=1)
             remaining_data = full_current_db[mask_to_keep]
@@ -279,13 +263,16 @@ else:
         else:
             final_to_save = edited_df
 
+        # Finalne czyszczenie i formatowanie
         final_to_save = final_to_save.dropna(subset=['pojazd'])
         final_to_save = final_to_save[final_to_save['event'] != ""]
         final_to_save['start'] = pd.to_datetime(final_to_save['start']).dt.strftime('%Y-%m-%d')
         final_to_save['koniec'] = pd.to_datetime(final_to_save['koniec']).dt.strftime('%Y-%m-%d')
+        
+        # Nazwy kolumn identyczne z arkuszem Google
         final_to_save.columns = ["Pojazd", "EVENT", "Start", "Koniec", "Kierowca", "Notatka"]
         
         conn.update(data=final_to_save)
         st.session_state.main_df = get_data()
-        st.success("Zapisano pomyślnie! Flota została zsynchronizowana.")
+        st.success("✅ Dane zapisane pomyślnie w Google Sheets.")
         st.rerun()
